@@ -1,0 +1,37 @@
+# ========================
+# Frontend (Next.js)
+# ========================
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.env*.local
+frontend/.vercel
+
+# ========================
+# Backend (Spring Boot)
+# ========================
+backend/.gradle/
+backend/build/
+backend/.env
+!backend/gradle/wrapper/gradle-wrapper.jar
+
+# ========================
+# IDE
+# ========================
+.idea/
+*.iml
+.vscode/
+*.class
+.claude
+
+# ========================
+# OS
+# ========================
+.DS_Store
+Thumbs.db
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
