@@ -1,37 +1,24 @@
-# ========================
-# Frontend (Next.js)
-# ========================
-frontend/.next/
-frontend/out/
-frontend/node_modules/
-frontend/.env*.local
-frontend/.vercel
+# Next.js
+.next/
+out/
 
-# ========================
-# Backend (Spring Boot)
-# ========================
-backend/.gradle/
-backend/build/
-backend/.env
-!backend/gradle/wrapper/gradle-wrapper.jar
+# Node
+node_modules/
+.env*.local
+.env
 
-# ========================
 # IDE
-# ========================
 .idea/
 *.iml
 .vscode/
-*.class
 .claude
 
-# ========================
 # OS
-# ========================
 .DS_Store
 Thumbs.db
 
-# ========================
 # Logs
-# ========================
 *.log
 logs/
+
+/lib/generated/prisma
