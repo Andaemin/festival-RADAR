@@ -1,5 +1,5 @@
 /**
- * 예산 추정 알고리즘의 모든 설정값 (Java AlgorithmConfig 직접 이식).
+ * 예산 추정 알고리즘의 모든 설정값.
  * 숫자를 바꿀 때는 이 파일만 수정한다.
  */
 export const algorithmConfig = {

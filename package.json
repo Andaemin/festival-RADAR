@@ -16,7 +16,11 @@
         "next": "16.3.0",
         "prisma": "^7.9.1",
         "react": "19.2.8",
-        "react-dom": "19.2.8"
+        "react-dom": "19.2.8",
+        "xlsx": "^0.18.5"
+    },
+    "prisma": {
+        "seed": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' prisma/seed.ts"
     },
     "devDependencies": {
         "@tailwindcss/postcss": "^4",
@@ -27,6 +31,7 @@
         "eslint": "^9",
         "eslint-config-next": "16.3.0",
         "tailwindcss": "^4",
+        "ts-node": "^10.9.2",
         "typescript": "^5"
     }
 }
