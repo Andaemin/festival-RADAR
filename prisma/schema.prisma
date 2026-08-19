@@ -7,6 +7,8 @@ datasource db {
   provider = "mysql"
 }
 
+// ─── User ──────────────────────────────────────────────────────────────────
+
 model User {
   id        Int      @id @default(autoincrement())
   username  String   @unique
@@ -21,4 +23,164 @@ model User {
 enum Role {
   ADMIN
   USER
+}
+
+// ─── Festival Dataset ──────────────────────────────────────────────────────
+
+model DatasetImportBatch {
+  id               Int          @id @default(autoincrement())
+  datasetYear      Int
+  originalFileName String       @db.VarChar(255)
+  fileHash         String       @db.Char(64)
+  totalRows        Int
+  validBudgetRows  Int
+  invalidRows      Int
+  importedAt       DateTime     @default(now())
+  status           ImportStatus
+  errorSummary     String?      @db.Text
+
+  festivalRecords FestivalRecord[]
+
+  @@map("dataset_import_batch")
+}
+
+model FestivalRecord {
+  id            Int    @id @default(autoincrement())
+  datasetYear   Int
+  sourceRowNumber Int
+
+  festivalName  String @db.VarChar(255)
+
+  // 주관 지역
+  region        Region
+  regionName    String @db.VarChar(20)
+  administrativeDistrict String? @db.VarChar(50)
+
+  // 축제 유형 및 개최 장소
+  festivalType  FestivalType
+  venueName     String?      @db.VarChar(255)
+  venueType     VenueType
+  venueRegion   String?      @db.VarChar(20)
+  venueDistrict String?      @db.VarChar(50)
+
+  // 개최 기간
+  startYear   Int?
+  startMonth  Int?
+  startDay    Int?
+  endYear     Int?
+  endMonth    Int?
+  endDay      Int?
+  durationDays   Int?
+  durationSource DurationSource?
+  durationNote   String?        @db.VarChar(255)
+
+  // 개최 주기
+  cycleType       CycleType
+  firstHeldYear   Int?
+  firstHeldYearNote String? @db.VarChar(20)
+
+  // 예산 (원 단위)
+  totalBudgetKrw    BigInt?
+  nationalBudgetKrw BigInt?
+  localBudgetKrw    BigInt?
+  otherBudgetKrw    BigInt?
+  budgetStatus      BudgetStatus
+
+  // 방문객 수
+  previousVisitors       Int?
+  previousVisitorsStatus VisitorCountStatus?
+  domesticVisitors       Int?
+  domesticVisitorsStatus VisitorCountStatus?
+  foreignVisitors        Int?
+  foreignVisitorsStatus  VisitorCountStatus?
+  visitorMeasurementMethod VisitorMeasurementMethod?
+
+  // Import 메타데이터
+  importBatch   DatasetImportBatch @relation(fields: [importBatchId], references: [id])
+  importBatchId Int
+  createdAt     DateTime           @default(now())
+
+  @@index([datasetYear])
+  @@index([importBatchId])
+  @@map("festival_record")
+}
+
+// ─── Enums ─────────────────────────────────────────────────────────────────
+
+enum ImportStatus {
+  SUCCESS
+  FAILED
+}
+
+enum Region {
+  SEOUL
+  BUSAN
+  DAEGU
+  INCHEON
+  GWANGJU
+  DAEJEON
+  ULSAN
+  SEJONG
+  GYEONGGI
+  GANGWON
+  CHUNGBUK
+  CHUNGNAM
+  JEONBUK
+  JEONNAM
+  GYEONGBUK
+  GYEONGNAM
+  JEJU
+}
+
+enum FestivalType {
+  CULTURE_ART
+  NATURE_ECOLOGY
+  COMMUNITY
+  TRADITION_HISTORY
+  LOCAL_SPECIALTY
+}
+
+enum VenueType {
+  VILLAGE
+  GREEN
+  WATERFRONT
+  INDEPENDENT
+  OTHER
+  UNDECIDED
+}
+
+enum BudgetStatus {
+  CONFIRMED
+  ZERO
+  UNCONFIRMED
+  NO_RESPONSE
+}
+
+enum DurationSource {
+  EXPLICIT
+  CALCULATED
+  ESTIMATED
+  UNKNOWN
+}
+
+enum CycleType {
+  ANNUAL
+  BIENNIAL
+  IRREGULAR
+  FIRST_YEAR
+  OTHER
+}
+
+enum VisitorCountStatus {
+  CONFIRMED
+  ESTIMATED
+  NO_RESPONSE
+  UNAVAILABLE
+}
+
+enum VisitorMeasurementMethod {
+  DIRECT_COUNT
+  ESTIMATION
+  NO_RESPONSE
+  UNAVAILABLE
 }
