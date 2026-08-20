@@ -96,12 +96,16 @@ export function parseBoolean(value: unknown): boolean {
   return s?.toLowerCase() === "true";
 }
 
-/** 숫자 또는 숫자 문자열을 소수점 2자리 Decimal-safe 문자열로. 아니면 null. */
+/** 숫자 또는 숫자 문자열을 소수점 3자리 Decimal-safe 문자열로 (HALF_UP).
+ *  scale=3은 Spring MultiYearFestivalRecord의 @Column(precision=18, scale=3)과 맞춘 canonical
+ *  정밀도다 - 예산 원본(CSV)이 42.85714285714286처럼 무한/장주기 소수인 경우가 있어 2자리로는
+ *  정밀도가 손실된다(forensic 대조로 실제 확인됨). toFixed(3)은 JS에서 양수에 대해 반올림
+ *  (round-half-away-from-zero)이라 HALF_UP과 결과가 같다. */
 export function toDecimalString(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return null;
-  return n.toFixed(2);
+  return n.toFixed(3);
 }
 
 export function toIntOrNull(value: unknown): number | null {

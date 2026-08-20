@@ -268,12 +268,15 @@ model MultiYearFestivalRecord {
   firstHeldYear Int?
 
   // 예산 — 원문 보존 + 알고리즘이 바로 쓰기 쉬운 파생값. 자동 단위보정 없음.
+  // scale=3: Spring MultiYearFestivalRecord의 @Column(precision=18, scale=3)과 정확히 동일.
+  // (14,2)였던 최초 스키마는 42.85714285714286 같은 3자리 소수를 42.86으로 반올림해 정밀도를
+  // 잃었던 실제 버그였다 - forensic 대조로 확인 후 Spring의 canonical scale에 맞춰 교정한다.
   budgetTotalRaw        String?                    @db.VarChar(50)
-  budgetTotalMillion    Decimal?                   @db.Decimal(14, 2)
+  budgetTotalMillion    Decimal?                   @db.Decimal(18, 3)
   budgetTotalKrw        BigInt?
-  budgetNationalMillion Decimal?                   @db.Decimal(14, 2)
-  budgetLocalMillion    Decimal?                   @db.Decimal(14, 2)
-  budgetOtherMillion    Decimal?                   @db.Decimal(14, 2)
+  budgetNationalMillion Decimal?                   @db.Decimal(18, 3)
+  budgetLocalMillion    Decimal?                   @db.Decimal(18, 3)
+  budgetOtherMillion    Decimal?                   @db.Decimal(18, 3)
   budgetQualityFlag     MultiYearBudgetQualityFlag
   budgetQualityNote     String?                    @db.VarChar(255)
 

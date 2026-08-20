@@ -4,8 +4,12 @@
  */
 
 /** scripts/import-multiyear-festivals.ts가 만드는 MultiYearImportBatch.importerVersion 값.
- *  normalization 로직을 바꾸면 이 값을 올려서, 같은 원본 파일이라도 새 batch로 재적재되게 한다. */
-export const IMPORTER_VERSION = "1.0.0";
+ *  normalization 로직을 바꾸면 이 값을 올려서, 같은 원본 파일이라도 새 batch로 재적재되게 한다.
+ *  1.0.1: budget*Million precision을 Decimal(14,2)→Decimal(18,3)로 교정(Spring과 scale 일치,
+ *  forensic 대조로 발견된 정밀도 손실 버그 수정). 재적재 시 기존 1.0.0 데이터를 먼저 비워야
+ *  같은 festival-year가 중복 2세트로 쌓이지 않는다(스크립트 자체는 idempotency만 보장하고
+ *  기존 버전 데이터 정리는 별도 단계다). */
+export const IMPORTER_VERSION = "1.0.1";
 
 export const DEFAULT_CSV_PATH = "prisma/data/festival_2017_2026_sanitized.csv";
 
