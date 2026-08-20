@@ -13,9 +13,13 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as XLSX from "xlsx";
+import "dotenv/config";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient } from "../lib/generated/prisma";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  adapter: new PrismaMariaDb(process.env.DATABASE_URL!),
+});
 
 // ─── 컬럼 인덱스 (0-based) ─────────────────────────────────────────────────
 const COL = {
@@ -183,6 +187,16 @@ function resolveVisitor(row: ExcelRow, col: number): { value: number | null; sta
   return { value: null, status };
 }
 
+/**
+ * 파일명에서 데이터셋 연도를 추출한다. "YYYY년" 형태만 인정한다.
+ * "190227_2019년 지역축제 개최계획.xlsx" 처럼 앞에 다른 숫자가 붙어 있어도
+ * 접두 날짜(1902)가 아니라 실제 연도(2019)를 집어낸다.
+ */
+function extractDatasetYear(fileName: string): number | null {
+  const match = fileName.match(/((?:19|20)\d{2})\s*년/);
+  return match ? parseInt(match[1], 10) : null;
+}
+
 // ─── 메인 실행 ───────────────────────────────────────────────────────────
 async function main() {
   // prisma/data/ 에서 xlsx 파일 찾기
@@ -194,10 +208,19 @@ async function main() {
   if (files.length === 0) {
     throw new Error("prisma/data/ 에 엑셀 파일(.xlsx)이 없습니다.");
   }
-  // 파일명 정렬 후 마지막(최신) 파일 사용
-  files.sort();
-  const filePath = path.join(dataDir, files[files.length - 1]);
-  const fileName = path.basename(filePath);
+  // 파일명에서 "YYYY년"을 뽑아 연도가 가장 큰 파일을 사용한다.
+  // (단순 파일명 정렬은 "★(최종)2017년..." 처럼 특수문자로 시작하는 파일이 뒤로 밀려 잘못 선택된다)
+  const candidates = files
+    .map((f) => ({ file: f, year: extractDatasetYear(f) }))
+    .filter((c): c is { file: string; year: number } => c.year !== null)
+    .sort((a, b) => a.year - b.year);
+  if (candidates.length === 0) {
+    throw new Error(
+      `prisma/data/ 의 파일명에서 연도("YYYY년")를 찾지 못했습니다: ${files.join(", ")}`
+    );
+  }
+  const { file: fileName, year: datasetYear } = candidates[candidates.length - 1];
+  const filePath = path.join(dataDir, fileName);
   console.log(`엑셀 파일: ${fileName}`);
 
   const fileBytes = fs.readFileSync(filePath);
@@ -210,9 +233,6 @@ async function main() {
     return;
   }
 
-  // 연도 추출 (파일명에 4자리 숫자가 있으면 사용, 없으면 현재 연도)
-  const yearMatch = fileName.match(/(\d{4})/);
-  const datasetYear = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
   console.log(`데이터셋 연도: ${datasetYear}`);
 
   // 엑셀 파싱
