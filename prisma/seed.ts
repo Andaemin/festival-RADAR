@@ -225,7 +225,8 @@ async function main() {
   // 전체를 2D 배열로 변환 (헤더 없이)
   const rawRows: ExcelRow[] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
 
-  const records: Parameters<typeof prisma.festivalRecord.create>[0]["data"][] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const records: any[] = [];
   let skipped = 0;
   const warnings: string[] = [];
 
@@ -255,7 +256,7 @@ async function main() {
     const domestic = resolveVisitor(row, COL.DOMESTIC_VISITORS);
     const foreign = resolveVisitor(row, COL.FOREIGN_VISITORS);
 
-    const firstHeldYearRaw = row[COL.FIRST_HELD_YEAR];
+    void row[COL.FIRST_HELD_YEAR]; // unused raw ref
     const firstHeldYear = cellIsNumber(row, COL.FIRST_HELD_YEAR) ? cellNumber(row, COL.FIRST_HELD_YEAR) : null;
     const firstHeldYearNote = !cellIsNumber(row, COL.FIRST_HELD_YEAR) ? trimToNull(cellString(row, COL.FIRST_HELD_YEAR)) : null;
 
