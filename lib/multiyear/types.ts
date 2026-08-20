@@ -14,6 +14,10 @@ export interface MultiYearRecordLite {
   id: number;
   datasetYear: number;
   festivalName: string;
+  /** 자연키 구성요소 - Spring reference와 hash 비교를 위해 보존(계산 자체에는 안 씀). */
+  sourceSha256: string;
+  sourceSheet: string;
+  sourceRow: number;
   region: Region | null;
   /** districtRaw를 trim한 값(placeholder 정규화는 거치지 않음) - resolveDistrict()의 결과. */
   district: string | null;

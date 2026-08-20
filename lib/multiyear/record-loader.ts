@@ -21,13 +21,16 @@ export type MultiYearRecordWithQuality = MultiYearRecordLite & { budgetQualityFl
 export async function loadAllMultiYearRecords(prisma: PrismaClient): Promise<MultiYearRecordWithQuality[]> {
   const rows = await prisma.multiYearFestivalRecord.findMany({
     orderBy: { id: "asc" },
-    include: { types: true },
+    include: { types: true, importBatch: { select: { sourceSha256: true } } },
   });
 
   return rows.map((r) => ({
     id: r.id,
     datasetYear: r.datasetYear,
     festivalName: r.festivalName,
+    sourceSha256: r.importBatch.sourceSha256,
+    sourceSheet: r.sourceSheet,
+    sourceRow: r.sourceRow,
     region: (r.region as Region | null) ?? null,
     district: resolveDistrict(r.districtRaw),
     typeTokens: resolveTypeTokensFromRelation(r.types),

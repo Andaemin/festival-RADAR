@@ -68,10 +68,18 @@ export function buildTrainingPool(
   return { trainingPool, excludedLowQuality, excludedMissingFeature };
 }
 
-interface FinalSample {
+export interface FinalSample {
   selection: MultiYearCandidateSelectionResult;
   finalSample: MultiYearScoredCandidate[];
 }
+
+/** select(trainingPool, query) -> selection 시그니처. V0(selectMultiYearCandidates)뿐 아니라
+ *  V1(selectMultiYearCandidatesV1) 등 어떤 전략을 넣어도 이후 채점 단계는 절대 안 바뀐다 -
+ *  Spring MultiYearCandidateSelectionStrategy와 동일한 역할. */
+export type MultiYearCandidateSelectorFn = (
+  trainingPool: MultiYearRecordLite[],
+  query: MultiYearQuery
+) => MultiYearCandidateSelectionResult;
 
 /**
  * 후보 선정 -> 유사도 -> 기간보정 -> winsorize -> threshold+상위 N건 컷.
@@ -81,12 +89,16 @@ interface FinalSample {
  * winsorize 기준 모집단은 trainingPool 전체(선정된 후보군이 아니라) 중 같은 festivalType이
  * overlap하는 record의 log-budget 분포다 - trainingPool 자체가 이미 `datasetYear < targetYear`로
  * 걸러져 있으므로 이 모집단도 자동으로 leakage-safe하다.
+ *
+ * @param selector 기본값은 V0(selectMultiYearCandidates) - 인자를 생략하면 기존 baseline S0와
+ *                 완전히 동일하게 동작한다(회귀 없음). V1 parity 검증 등에서만 다른 selector를 넣는다.
  */
-function selectFinalSample(
+export function selectFinalSample(
   trainingPool: MultiYearRecordLite[],
-  query: MultiYearQuery
+  query: MultiYearQuery,
+  selector: MultiYearCandidateSelectorFn = selectMultiYearCandidates
 ): FinalSample | null {
-  const selection = selectMultiYearCandidates(trainingPool, query);
+  const selection = selector(trainingPool, query);
   if (selection.candidates.length === 0) return null;
 
   const typePopulationLogBudgets = trainingPool
@@ -234,15 +246,19 @@ function toPredictionCandidate(c: MultiYearScoredCandidate): MultiYearPrediction
  *                     필터까지 적용한 pool. 이 함수 자체는 추가로 연도 필터링을 하지 않는다 -
  *                     호출자가 trainingPool을 targetYear에 맞게 만들어 왔다고 신뢰한다(테스트/백테스트
  *                     검증에서 여러 targetYear를 재사용하기 쉽게 하기 위함).
+ * @param selector 기본값 V0 - 생략하면 기존 baseline S0와 100% 동일(회귀 없음). V1 등 다른 selector로
+ *                 바꿔도 이 함수 아래(유사도/기간보정/winsorize/threshold+컷/가중통계/confidence/v3)는
+ *                 절대 바뀌지 않는다.
  */
 export function computeBaselineEstimate(
   targetYear: number,
   trainingYearFrom: number,
   trainingYearTo: number,
   trainingPool: MultiYearRecordLite[],
-  query: MultiYearQuery
+  query: MultiYearQuery,
+  selector: MultiYearCandidateSelectorFn = selectMultiYearCandidates
 ): MultiYearPredictionResult {
-  const fs = selectFinalSample(trainingPool, query);
+  const fs = selectFinalSample(trainingPool, query, selector);
   if (fs === null) {
     return emptyResult(targetYear, trainingYearFrom, trainingYearTo);
   }
