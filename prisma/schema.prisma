@@ -45,15 +45,15 @@ model DatasetImportBatch {
 }
 
 model FestivalRecord {
-  id            Int    @id @default(autoincrement())
-  datasetYear   Int
+  id              Int @id @default(autoincrement())
+  datasetYear     Int
   sourceRowNumber Int
 
-  festivalName  String @db.VarChar(255)
+  festivalName String @db.VarChar(255)
 
   // 주관 지역
-  region        Region
-  regionName    String @db.VarChar(20)
+  region                 Region
+  regionName             String  @db.VarChar(20)
   administrativeDistrict String? @db.VarChar(50)
 
   // 축제 유형 및 개최 장소
@@ -64,20 +64,20 @@ model FestivalRecord {
   venueDistrict String?      @db.VarChar(50)
 
   // 개최 기간
-  startYear   Int?
-  startMonth  Int?
-  startDay    Int?
-  endYear     Int?
-  endMonth    Int?
-  endDay      Int?
+  startYear      Int?
+  startMonth     Int?
+  startDay       Int?
+  endYear        Int?
+  endMonth       Int?
+  endDay         Int?
   durationDays   Int?
   durationSource DurationSource?
-  durationNote   String?        @db.VarChar(255)
+  durationNote   String?         @db.VarChar(255)
 
   // 개최 주기
-  cycleType       CycleType
-  firstHeldYear   Int?
-  firstHeldYearNote String? @db.VarChar(20)
+  cycleType         CycleType
+  firstHeldYear     Int?
+  firstHeldYearNote String?   @db.VarChar(20)
 
   // 예산 (원 단위)
   totalBudgetKrw    BigInt?
@@ -87,12 +87,12 @@ model FestivalRecord {
   budgetStatus      BudgetStatus
 
   // 방문객 수
-  previousVisitors       Int?
-  previousVisitorsStatus VisitorCountStatus?
-  domesticVisitors       Int?
-  domesticVisitorsStatus VisitorCountStatus?
-  foreignVisitors        Int?
-  foreignVisitorsStatus  VisitorCountStatus?
+  previousVisitors         Int?
+  previousVisitorsStatus   VisitorCountStatus?
+  domesticVisitors         Int?
+  domesticVisitorsStatus   VisitorCountStatus?
+  foreignVisitors          Int?
+  foreignVisitorsStatus    VisitorCountStatus?
   visitorMeasurementMethod VisitorMeasurementMethod?
 
   // Import 메타데이터
@@ -182,4 +182,145 @@ enum VisitorMeasurementMethod {
   NOT_TALLIED
   OTHER
   NO_RESPONSE
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Multi-Year Festival Dataset (Planning Assistant, 2017–2026)
+//
+// 기존 FestivalRecord/DatasetImportBatch(2026 production, /api/v1/budget-estimates가
+// 참조)와 완전히 분리된 모델이다. 이 섹션의 모델/enum은 production 쿼리·seed.ts에서
+// 참조되지 않으며, 참조해서도 안 된다. 다년도 데이터 import 및 검증 전용.
+//
+// source: festival_2017_2026_sanitized.csv (2017~2026 원본 개최계획 엑셀을
+// 로컬 프로젝트에서 사전 정규화한 canonical dataset, 10,198 rows 검증 완료)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model MultiYearImportBatch {
+  id             Int     @id @default(autoincrement())
+  datasetYear    Int
+  sourceFileName String? @db.VarChar(255)
+  sourceSha256   String  @db.Char(64) // 원본 연도별 엑셀 파일 해시 (연도당 1개, 추적용)
+
+  // canonical CSV(festival_2017_2026_sanitized.csv) 자체의 해시 + 이걸 만든 importer 버전.
+  // sourceSha256(원본 엑셀)만으로 idempotency key를 삼으면, 같은 원본을 나중에 다시
+  // normalize해서 CSV 내용이 바뀌어도(정규화 로직 수정 등) 동일 batch로 오인해 skip될
+  // 위험이 있어 분리한다. "재실행해도 중복 안 쌓임"의 기준은 (연도, 원본, canonical
+  // 결과물, importer 버전)의 조합이다.
+  canonicalDatasetSha256 String @db.Char(64)
+  importerVersion        String @db.VarChar(50)
+
+  totalRows                Int
+  validBudgetRows          Int
+  missingOrNonPositiveRows Int
+  unitScaleSuspectRows     Int
+
+  importedAt   DateTime     @default(now())
+  status       ImportStatus
+  errorSummary String?      @db.Text
+
+  records MultiYearFestivalRecord[]
+
+  @@unique([datasetYear, sourceSha256, canonicalDatasetSha256, importerVersion])
+  @@map("multi_year_import_batch")
+}
+
+model MultiYearFestivalRecord {
+  id          Int    @id @default(autoincrement())
+  datasetYear Int
+  sourceSheet String @db.VarChar(50)
+  sourceRow   Int
+
+  // 지역 (raw 원문 + canonical). region은 기존 production Region enum 재사용,
+  // 매핑 불가한 원문이면 null (지어내지 않음).
+  regionRaw   String  @db.VarChar(50)
+  region      Region?
+  districtRaw String? @db.VarChar(100)
+  district    String? @db.VarChar(50) // placeholder(시자체/본청 등) 제거된 canonical. importer가 정규화.
+
+  festivalName String @db.VarChar(255)
+
+  // 축제 유형 — 원문에 복수 유형이 존재하므로 단일 enum 컬럼이 아닌 관계로 표현.
+  festivalTypeRaw String?                       @db.VarChar(200)
+  types           MultiYearFestivalRecordType[]
+
+  // 개최 장소 — venueType은 기존 production VenueType enum 재사용, nullable.
+  // (2017~2024 원본엔 이 항목 자체가 없어 null이 정상 데이터임 — OTHER/UNDECIDED로 대체 금지)
+  venueRaw     String?    @db.VarChar(255)
+  venueTypeRaw String?    @db.VarChar(50)
+  venueType    VenueType?
+
+  // 개최 기간
+  periodRaw       String?                  @db.VarChar(255)
+  durationDays    Int?
+  durationSource  MultiYearDurationSource?
+  durationNoteRaw String?                  @db.VarChar(255)
+
+  // 개최 주기 — 원문 표현이 매우 다양해 raw 중심. 명확한 값(매년/격년/일회성/최초)만
+  // 기존 production CycleType enum으로 canonical 매핑, 나머지는 null.
+  cycleRaw  String?    @db.VarChar(100)
+  cycleType CycleType?
+
+  // 2020~2021 코로나 특수 컬럼 — 원문이 매우 비정형이라 raw만 보존.
+  eventMode     String? @db.VarChar(255)
+  eventStatus   String? @db.VarChar(255)
+  covidAffected Boolean @default(false)
+
+  firstHeldYear Int?
+
+  // 예산 — 원문 보존 + 알고리즘이 바로 쓰기 쉬운 파생값. 자동 단위보정 없음.
+  budgetTotalRaw        String?                    @db.VarChar(50)
+  budgetTotalMillion    Decimal?                   @db.Decimal(14, 2)
+  budgetTotalKrw        BigInt?
+  budgetNationalMillion Decimal?                   @db.Decimal(14, 2)
+  budgetLocalMillion    Decimal?                   @db.Decimal(14, 2)
+  budgetOtherMillion    Decimal?                   @db.Decimal(14, 2)
+  budgetQualityFlag     MultiYearBudgetQualityFlag
+  budgetQualityNote     String?                    @db.VarChar(255)
+
+  visitorTotalPersons Int?
+
+  importBatch   MultiYearImportBatch @relation(fields: [importBatchId], references: [id])
+  importBatchId Int
+  createdAt     DateTime             @default(now())
+
+  @@unique([importBatchId, sourceSheet, sourceRow]) // source identity: 한 batch 안에서 같은 원본 행이 중복 삽입되지 않도록
+  @@index([datasetYear])
+  @@index([importBatchId])
+  @@index([region])
+  @@map("multi_year_festival_record")
+}
+
+// festivalType 복수값을 위한 관계 테이블 (예: 2024 데이터 56건이 복수 유형).
+// 파이프 문자열로 뭉개지 않고 관계로 보존해, 다음 Phase의 CandidateSelector가
+// `some: { type: X }` 형태로 바로 질의할 수 있게 한다.
+model MultiYearFestivalRecordType {
+  id       Int                     @id @default(autoincrement())
+  record   MultiYearFestivalRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  recordId Int
+  type     MultiYearFestivalType
+
+  @@unique([recordId, type])
+  @@map("multi_year_festival_record_type")
+}
+
+enum MultiYearFestivalType {
+  CULTURE_ART
+  NATURE_ECOLOGY
+  COMMUNITY
+  TRADITION_HISTORY
+  LOCAL_SPECIALTY
+  OTHER
+  UNKNOWN
+}
+
+enum MultiYearDurationSource {
+  EXPLICIT_TEXT
+  SOURCE_TOTAL_DAYS
+  UNPARSED
+}
+
+enum MultiYearBudgetQualityFlag {
+  VALID
+  MISSING_OR_NONPOSITIVE
+  UNIT_SCALE_SUSPECT
 }

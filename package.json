@@ -6,7 +6,8 @@
         "dev": "next dev",
         "build": "next build",
         "start": "next start",
-        "lint": "eslint"
+        "lint": "eslint",
+        "import:multiyear": "tsx scripts/import-multiyear-festivals.ts"
     },
     "dependencies": {
         "@prisma/adapter-mariadb": "^7.9.1",
