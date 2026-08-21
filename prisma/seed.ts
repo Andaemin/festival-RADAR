@@ -193,7 +193,7 @@ function resolveVisitor(row: ExcelRow, col: number): { value: number | null; sta
  * 접두 날짜(1902)가 아니라 실제 연도(2019)를 집어낸다.
  */
 function extractDatasetYear(fileName: string): number | null {
-  const match = fileName.match(/((?:19|20)\d{2})\s*년/);
+  const match = fileName.normalize("NFC").match(/((?:19|20)\d{2})\s*년/);
   return match ? parseInt(match[1], 10) : null;
 }
 
