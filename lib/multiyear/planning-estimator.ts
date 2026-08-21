@@ -20,6 +20,7 @@ export interface MultiYearPlanningEstimateResult {
   recommendedBudgetKrw: number;
   p25Krw: number;
   p50Krw: number;
+  p60Krw: number;
   p75Krw: number;
   sampleCount: number;
   distinctYearsUsed: number;
@@ -51,6 +52,7 @@ function emptyPlanningResult(
     recommendedBudgetKrw: 0,
     p25Krw: 0,
     p50Krw: 0,
+    p60Krw: 0,
     p75Krw: 0,
     sampleCount: 0,
     distinctYearsUsed: 0,
@@ -125,6 +127,7 @@ export function estimateForPlanning(
     recommendedBudgetKrw: Math.round(stats.recommendedBudget),
     p25Krw: Math.round(stats.p25),
     p50Krw: Math.round(stats.p50),
+    p60Krw: Math.round(stats.p60),
     p75Krw: Math.round(stats.p75),
     sampleCount: stats.sampleCount,
     distinctYearsUsed,
