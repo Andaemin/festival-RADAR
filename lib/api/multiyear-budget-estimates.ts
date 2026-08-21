@@ -28,6 +28,10 @@ export interface MultiYearBudgetEstimateResponse {
     appliedReferenceDataPolicy: string;
     referenceYearFrom: number;
     referenceYearTo: number;
+    /** referencePool(선택 이전) 실제 datasetYear 범위 - "참조 대상 데이터". referenceYearTo(정책상
+     *  허용 상한)와 다를 수 있다(보유 데이터가 정책 허용 범위보다 짧을 때). */
+    referencePoolEarliestYear: number | null;
+    referencePoolLatestYear: number | null;
     estimatedBudgetKrw: number;
     weightedAverageBudgetKrw: number;
     recommendedBudgetKrw: number;

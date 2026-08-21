@@ -489,20 +489,40 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
                 <span className="text-xs text-gray-900">{result.model}</span>
             </div>
 
-            {/* 참고 데이터 범위 - 정책상 허용 범위(referenceYearFrom~To)가 아니라 실제로 최종 표본에
-                쓰인 연도(earliestSourceYear~latestSourceYear)를 보여준다. 정책 window는 "이 연도까지는
-                써도 된다"는 허용치일 뿐이고, 데이터가 그 범위를 다 채우지 못하면(예: 2030년 기획인데
-                보유 데이터는 2026년까지) 실제로 쓴 연도만 보여줘야 사용자가 착각하지 않는다. */}
-            <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-3 text-sm">
-                <span className="text-gray-900">참고 데이터</span>
-                <span className="font-bold text-gray-800">
-                    {result.earliestSourceYear !== null && result.latestSourceYear !== null
-                        ? `${result.earliestSourceYear}~${result.latestSourceYear}`
-                        : "참고 가능한 데이터 없음"}
-                </span>
-                <span className="text-xs text-gray-900">({REFERENCE_POLICY_LABEL[result.appliedReferenceDataPolicy] ?? result.appliedReferenceDataPolicy})</span>
-                {result.latestSourceYear !== null && result.latestSourceYear < result.referenceYearTo && (
-                    <span className="text-xs text-gray-900">· 정책상 {result.referenceYearFrom}~{result.referenceYearTo}까지 허용되지만 보유 데이터가 {result.latestSourceYear}년까지뿐이라 그만큼만 사용</span>
+            {/* 세 값을 서로 대체하지 않고 명확히 분리해서 보여준다(서로 다른 파이프라인 단계).
+                - 정책상 범위(referenceYearTo): appliedReferenceDataPolicy가 허용하는 연도 상한.
+                  planningYear/정책만으로 정해지며 실제 보유 데이터와 무관하다.
+                - 참조 대상 데이터(referencePoolEarliestYear~LatestYear): filterReferencePool 결과
+                  전체(= CandidateSelector 진입 전)의 실제 datasetYear 범위. "실제로 후보 탐색에
+                  쓸 수 있었던 데이터가 어디까지 있었는가" - referenceYearTo보다 작을 수 있다(정책은
+                  더 먼 미래까지 허용해도 실제 보유 데이터가 거기까지 없을 때).
+                - 최종 비교 표본(earliestSourceYear~latestSourceYear): CandidateSelectorV1 +
+                  similarity 기반 top-N 컷 이후 실제 최종 통계 계산에 포함된 연도. 참조 대상 데이터
+                  전체가 탐색됐다고 해서 그 안의 모든 연도가 최종 표본에 남는 건 아니다 - 최신 연도
+                  후보가 similarity 하한(threshold)은 넘어도 다른 연도의 더 높은 similarity 후보에
+                  top-N cut에서 밀려날 수 있다(정상적인 selector/scoring 결과). */}
+            <div className="flex flex-col gap-2 bg-gray-50 rounded-lg px-4 py-3 text-sm">
+                <div className="flex items-center gap-3">
+                    <span className="text-gray-900 w-28 shrink-0">참조 대상 데이터</span>
+                    <span className="font-bold text-gray-800">
+                        {result.referencePoolEarliestYear !== null && result.referencePoolLatestYear !== null
+                            ? `${result.referencePoolEarliestYear}~${result.referencePoolLatestYear}`
+                            : "참조 가능한 데이터 없음"}
+                    </span>
+                    <span className="text-xs text-gray-900">({REFERENCE_POLICY_LABEL[result.appliedReferenceDataPolicy] ?? result.appliedReferenceDataPolicy})</span>
+                </div>
+                <div className="flex items-center gap-3">
+                    <span className="text-gray-900 w-28 shrink-0">최종 비교 표본</span>
+                    <span className="font-bold text-gray-800">
+                        {result.earliestSourceYear !== null && result.latestSourceYear !== null
+                            ? `${result.earliestSourceYear}~${result.latestSourceYear} 중 ${result.distinctYearsUsed}개 연도`
+                            : "참고 가능한 데이터 없음"}
+                    </span>
+                </div>
+                {result.referencePoolLatestYear !== null && result.referencePoolLatestYear < result.referenceYearTo && (
+                    <p className="text-xs text-gray-900">
+                        정책상 {result.referenceYearTo}년까지 참고할 수 있으나, 현재 참조 가능한 데이터는 {result.referencePoolLatestYear}년까지입니다.
+                    </p>
                 )}
             </div>
 
