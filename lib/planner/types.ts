@@ -138,7 +138,7 @@ export interface PlanningRecommendationResponse {
     /** 외부 데이터/LLM 연동 상태. UI가 "왜 이 섹션이 비었는지" 설명하는 데 쓴다. */
     integrations: {
         tourApi: IntegrationStatus;
-        regionalCulture: IntegrationStatus;
+        localStory: IntegrationStatus;
         llm: IntegrationStatus;
     };
     llmPlan: LlmPlanDraft | null;

@@ -495,7 +495,7 @@ export default function PlannerPage() {
                                 {(
                                     [
                                         ["TourAPI 4.0 (축제 상세 프로그램)", result.integrations.tourApi],
-                                        ["지역N문화 (지역 설화·향토자산)", result.integrations.regionalCulture],
+                                        ["지역 스토리 (설화·향토자산)", result.integrations.localStory],
                                         ["AI 기획안 생성", result.integrations.llm],
                                     ] as const
                                 ).map(([label, status]) => (

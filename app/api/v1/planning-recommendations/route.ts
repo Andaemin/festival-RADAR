@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FESTIVAL_TYPE_DISPLAY, FestivalType, REGION_DISPLAY, Region, VenueType } from "@/lib/domain/enums";
 import { enrichByFestivalName, isTourApiEnabled, type TourApiFestivalDetail } from "@/lib/external/tour-api";
-import { isRegionalCultureEnabled, searchLocalStories } from "@/lib/external/regional-culture";
+import { LOCAL_STORY_DISABLED_REASON, isLocalStoryEnabled, searchLocalStories } from "@/lib/external/local-story";
 import { generatePlanDraft, isLlmEnabled } from "@/lib/llm/plan-draft";
 import { generateRecommendations } from "@/lib/planner/recommendation-engine";
 import { loadPlannerCorpus } from "@/lib/planner/record-source";
@@ -83,20 +83,20 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        const regionalCulture: IntegrationStatus = isRegionalCultureEnabled()
+        const localStory: IntegrationStatus = isLocalStoryEnabled()
             ? { enabled: true, reason: null }
-            : { enabled: false, reason: "REGIONAL_CULTURE_SERVICE_KEY / BASE_URL이 설정되지 않았습니다." };
+            : { enabled: false, reason: LOCAL_STORY_DISABLED_REASON };
 
-        if (regionalCulture.enabled) {
+        if (localStory.enabled) {
             try {
                 // 지역 설화·향토자산은 추천 카드의 스토리 근거로만 쓰므로 실패해도 무시한다.
                 const stories = await searchLocalStories(REGION_DISPLAY[regionCode as Region] ?? regionCode);
                 if (stories.length === 0) {
-                    warnings.push("지역N문화 API에서 관련 스토리를 찾지 못했습니다.");
+                    warnings.push("지역 스토리 제공자에서 관련 스토리를 찾지 못했습니다.");
                 }
             } catch (e) {
-                regionalCulture.enabled = false;
-                regionalCulture.reason = e instanceof Error ? e.message : String(e);
+                localStory.enabled = false;
+                localStory.reason = e instanceof Error ? e.message : String(e);
             }
         }
 
@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
             monthDistribution: engine.monthDistribution,
             budgetEfficiency: engine.budgetEfficiency,
             whitespace: engine.whitespace,
-            integrations: { tourApi, regionalCulture, llm },
+            integrations: { tourApi, localStory, llm },
             llmPlan,
             warnings,
         };
