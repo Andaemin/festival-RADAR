@@ -7,6 +7,7 @@
         "build": "next build",
         "start": "next start",
         "lint": "eslint",
+        "test": "vitest run",
         "import:multiyear": "tsx scripts/import-multiyear-festivals.ts",
         "verify:multiyear-baseline": "tsx scripts/verify-multiyear-baseline.ts",
         "verify:multiyear-selector-v1": "tsx scripts/verify-multiyear-candidate-selector-v1.ts",
@@ -38,6 +39,7 @@
         "tailwindcss": "^4",
         "ts-node": "^10.9.2",
         "tsx": "^4.23.12",
-        "typescript": "^5"
+        "typescript": "^5",
+        "vitest": "^4.1.11"
     }
 }
