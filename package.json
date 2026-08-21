@@ -9,7 +9,9 @@
         "lint": "eslint",
         "import:multiyear": "tsx scripts/import-multiyear-festivals.ts",
         "verify:multiyear-baseline": "tsx scripts/verify-multiyear-baseline.ts",
-        "verify:multiyear-selector-v1": "tsx scripts/verify-multiyear-candidate-selector-v1.ts"
+        "verify:multiyear-selector-v1": "tsx scripts/verify-multiyear-candidate-selector-v1.ts",
+        "seed:multiyear-publication-status": "tsx scripts/seed-multiyear-publication-status.ts",
+        "verify:multiyear-planning": "tsx scripts/verify-multiyear-planning-estimate.ts"
     },
     "dependencies": {
         "@prisma/adapter-mariadb": "^7.9.1",

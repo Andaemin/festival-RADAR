@@ -327,3 +327,27 @@ enum MultiYearBudgetQualityFlag {
   MISSING_OR_NONPOSITIVE
   UNIT_SCALE_SUSPECT
 }
+
+// ─── Publication Status (Phase 5: Planning Assistant reference-year 판단용) ──
+//
+// "그 해 축제가 모두 개최·집행 완료됐다"는 뜻이 아니다 - "해당 연도(datasetYear)의 지역축제
+// 개최계획(예산 포함) 데이터셋 원본이 공개 기준으로 완성되어, 아직 그 해 축제가 실제로 열리기
+// 전이라도 계획예산 참고자료로 안전하게 쓸 수 있다"는 뜻이다(Spring
+// MultiYearDatasetPublicationStatusValue와 동일 정의). MultiYearImportBatch(파일을 DB에
+// 넣었는가)와는 별개 개념이라 재사용하지 않고 연도 단위로 독립된 테이블을 둔다.
+//
+// row가 없는 연도는 애플리케이션 로직에서 PARTIAL로 취급한다(마이그레이션이 운영 데이터를
+// 하드코딩하지 않는다 - 실제 연도별 상태는 별도 seed 스크립트가 채운다).
+model MultiYearDatasetPublicationStatus {
+  id          Int                                    @id @default(autoincrement())
+  datasetYear Int                                    @unique
+  status      MultiYearDatasetPublicationStatusValue
+  publishedAt DateTime?
+
+  @@map("multi_year_dataset_publication_status")
+}
+
+enum MultiYearDatasetPublicationStatusValue {
+  PARTIAL
+  PUBLISHED_PLAN_COMPLETE
+}

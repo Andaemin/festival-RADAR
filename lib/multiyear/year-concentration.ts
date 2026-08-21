@@ -64,3 +64,28 @@ export function latestYearWeightShare(records: { datasetYear: number; weight: nu
   const latestYear = Math.max(...weightByYear.keys());
   return (weightByYear.get(latestYear) ?? 0) / total;
 }
+
+export interface MultiYearYearWeightShare {
+  year: number;
+  candidateCount: number;
+  weightShare: number;
+}
+
+/** 연도 오름차순 {year, candidateCount, weightShare} 목록 - weightShare 합은 (표본이 있으면) 1.
+ *  Spring MultiYearBacktestService.yearWeightBreakdown/MultiYearSelectorLabConcentrationAnalyzer.analyze와 동일. */
+export function buildYearWeightBreakdown(records: { datasetYear: number; weight: number }[]): MultiYearYearWeightShare[] {
+  const countByYear = new Map<number, number>();
+  const weightByYear = new Map<number, number>();
+  let total = 0;
+  for (const r of records) {
+    countByYear.set(r.datasetYear, (countByYear.get(r.datasetYear) ?? 0) + 1);
+    weightByYear.set(r.datasetYear, (weightByYear.get(r.datasetYear) ?? 0) + r.weight);
+    total += r.weight;
+  }
+  const years = [...countByYear.keys()].sort((a, b) => a - b);
+  return years.map((year) => ({
+    year,
+    candidateCount: countByYear.get(year)!,
+    weightShare: total > 0 ? (weightByYear.get(year) ?? 0) / total : 0,
+  }));
+}

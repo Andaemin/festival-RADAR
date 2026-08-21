@@ -134,7 +134,7 @@ export function selectFinalSample(
   return { selection, finalSample };
 }
 
-interface CoreStats {
+export interface CoreStats {
   sampleCount: number;
   weightedAverage: number;
   estimated: number;
@@ -153,7 +153,7 @@ interface CoreStats {
  * 포팅한다. legacy confidence는 예비비(contingency) 계산에만 쓰고, dataQualityV3는 완전히
  * 별개의 순수 설명용 지표로 분리해 둔다(요청사항) - 서로의 계산에 영향을 주지 않는다.
  */
-function computeCoreStats(fs: FinalSample, weights: number[], districtProvided: boolean): CoreStats {
+export function computeCoreStats(fs: FinalSample, weights: number[], districtProvided: boolean): CoreStats {
   const finalSample = fs.finalSample;
   const sampleCount = finalSample.length;
   const values = finalSample.map((c) => c.winsorizedBudgetKrw);
@@ -218,7 +218,7 @@ function emptyResult(targetYear: number, trainingYearFrom: number, trainingYearT
   };
 }
 
-function toPredictionCandidate(c: MultiYearScoredCandidate): MultiYearPredictionCandidate {
+export function toPredictionCandidate(c: MultiYearScoredCandidate): MultiYearPredictionCandidate {
   const r = c.record;
   return {
     sourceYear: r.datasetYear,
