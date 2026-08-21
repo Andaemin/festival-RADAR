@@ -115,10 +115,10 @@ export default function AssistantTesterPage() {
     }
 
     return (
-        <main className="min-h-screen bg-gray-50 p-8">
+        <main className="min-h-screen bg-gray-50 p-8 text-gray-900">
             <div className="max-w-3xl mx-auto">
                 <h1 className="text-2xl font-bold mb-1">축제 예산 추정 테스터</h1>
-                <p className="text-sm text-gray-500 mb-6">festival-budget-assistant 알고리즘 연동 확인용</p>
+                <p className="text-sm text-gray-900 mb-6">festival-budget-assistant 알고리즘 연동 확인용</p>
 
                 {metaError && (
                     <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
@@ -144,7 +144,7 @@ export default function AssistantTesterPage() {
 
                     {/* 시군구 */}
                     <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium">시군구 <span className="text-gray-400 font-normal">(선택)</span></label>
+                        <label className="text-sm font-medium">시군구 <span className="text-gray-900 font-normal">(선택)</span></label>
                         <select
                             className="border rounded px-3 py-2 text-sm"
                             value={district}
@@ -190,7 +190,7 @@ export default function AssistantTesterPage() {
 
                     {/* 개최 일수 */}
                     <div className="flex flex-col gap-1">
-                        <label className="text-sm font-medium">개최 일수 <span className="text-gray-400">(최소 2일)</span></label>
+                        <label className="text-sm font-medium">개최 일수 <span className="text-gray-900">(최소 2일)</span></label>
                         <input
                             type="number"
                             min={2}
@@ -220,12 +220,12 @@ export default function AssistantTesterPage() {
 
                 <div className="mt-12 pt-8 border-t border-gray-200">
                     <h2 className="text-2xl font-bold mb-1">다년도 계획예산</h2>
-                    <p className="text-sm text-gray-500 mb-6">2017~2026년 공개 개최계획 데이터를 참고해 미래 축제의 계획예산을 추정합니다.</p>
+                    <p className="text-sm text-gray-900 mb-6">2017~2026년 공개 개최계획 데이터를 참고해 미래 축제의 계획예산을 추정합니다.</p>
 
                     <form onSubmit={handleMultiYearSubmit} className="bg-white rounded-xl shadow p-6 flex flex-col gap-4 mb-6">
                         <div className="flex flex-col gap-1">
                             <label className="text-sm font-medium">기획연도</label>
-                            <p className="text-xs text-gray-400 mb-1">어느 연도에 개최할 축제를 기획하고 계신가요? (데이터가 수집된 연도가 아니라, 앞으로 열릴 축제의 개최연도입니다)</p>
+                            <p className="text-xs text-gray-900 mb-1">어느 연도에 개최할 축제를 기획하고 계신가요? (데이터가 수집된 연도가 아니라, 앞으로 열릴 축제의 개최연도입니다)</p>
                             <input
                                 type="number"
                                 className="border rounded px-3 py-2 text-sm w-32"
@@ -249,7 +249,7 @@ export default function AssistantTesterPage() {
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">시군구 <span className="text-gray-400 font-normal">(선택)</span></label>
+                            <label className="text-sm font-medium">시군구 <span className="text-gray-900 font-normal">(선택)</span></label>
                             <select
                                 className="border rounded px-3 py-2 text-sm"
                                 value={myDistrict}
@@ -264,7 +264,7 @@ export default function AssistantTesterPage() {
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">축제 유형 <span className="text-gray-400 font-normal">(복수 선택 가능)</span></label>
+                            <label className="text-sm font-medium">축제 유형 <span className="text-gray-900 font-normal">(복수 선택 가능)</span></label>
                             <div className="flex flex-wrap gap-3">
                                 {metadata?.festivalTypes.map((t) => (
                                     <label key={t.code} className="flex items-center gap-1.5 text-sm">
@@ -294,7 +294,7 @@ export default function AssistantTesterPage() {
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">개최 일수 <span className="text-gray-400">(최소 2일)</span></label>
+                            <label className="text-sm font-medium">개최 일수 <span className="text-gray-900">(최소 2일)</span></label>
                             <input
                                 type="number"
                                 min={2}
@@ -317,7 +317,7 @@ export default function AssistantTesterPage() {
                                 />
                                 <span>
                                     <span className="font-medium block">과거 공개자료만 사용</span>
-                                    <span className="text-gray-500 text-xs">기획연도 이전에 공개된 축제 계획자료만 참고합니다.</span>
+                                    <span className="text-gray-900 text-xs">기획연도 이전에 공개된 축제 계획자료만 참고합니다.</span>
                                 </span>
                             </label>
                             <label className="flex items-start gap-2 text-sm border rounded-lg p-3 cursor-pointer has-[:checked]:border-blue-400 has-[:checked]:bg-blue-50">
@@ -330,7 +330,7 @@ export default function AssistantTesterPage() {
                                 />
                                 <span>
                                     <span className="font-medium block">기획연도 공개자료도 포함</span>
-                                    <span className="text-gray-500 text-xs">기획연도의 공식 축제 계획자료가 완성 공개된 경우 해당 연도 자료도 함께 참고합니다.</span>
+                                    <span className="text-gray-900 text-xs">기획연도의 공식 축제 계획자료가 완성 공개된 경우 해당 연도 자료도 함께 참고합니다.</span>
                                 </span>
                             </label>
                         </div>
@@ -367,7 +367,7 @@ function ResultCard({ result }: { result: BudgetEstimateResponse }) {
         <div className="bg-white rounded-xl shadow p-6 flex flex-col gap-5">
             <div className="flex items-center justify-between">
                 <h2 className="font-bold text-lg">추정 결과</h2>
-                <span className="text-xs text-gray-400">{result.algorithmVersion} · {result.datasetYear}년 데이터</span>
+                <span className="text-xs text-gray-900">{result.algorithmVersion} · {result.datasetYear}년 데이터</span>
             </div>
 
             {/* 핵심 수치 */}
@@ -382,19 +382,19 @@ function ResultCard({ result }: { result: BudgetEstimateResponse }) {
 
             {/* 범위 */}
             <div className="flex gap-2 items-center text-sm">
-                <span className="text-gray-500">일반 범위</span>
+                <span className="text-gray-900">일반 범위</span>
                 <span className="font-medium">{fmt(result.typicalRange.minKrw)}</span>
-                <span className="text-gray-400">~</span>
+                <span className="text-gray-900">~</span>
                 <span className="font-medium">{fmt(result.typicalRange.maxKrw)}</span>
-                <span className="text-gray-400 text-xs">(P25~P75)</span>
+                <span className="text-gray-900 text-xs">(P25~P75)</span>
             </div>
 
             {/* 신뢰도 */}
             <div className="flex gap-3 items-center text-sm">
-                <span className="text-gray-500">신뢰도</span>
+                <span className="text-gray-900">신뢰도</span>
                 <span className={`font-bold ${confidenceColor}`}>{result.confidence.label}</span>
-                <span className="text-gray-400">{result.confidence.score.toFixed(1)}점</span>
-                <span className="text-gray-400 text-xs">fallback: {result.fallbackLabel}</span>
+                <span className="text-gray-900">{result.confidence.score.toFixed(1)}점</span>
+                <span className="text-gray-900 text-xs">fallback: {result.fallbackLabel}</span>
             </div>
 
             {/* 경고 */}
@@ -425,10 +425,10 @@ function ResultCard({ result }: { result: BudgetEstimateResponse }) {
                                 {result.similarFestivals.map((f, i) => (
                                     <tr key={i} className="border-b last:border-0">
                                         <td className="px-2 py-1.5">{f.festivalName}</td>
-                                        <td className="px-2 py-1.5 text-gray-500">{f.region}</td>
-                                        <td className="px-2 py-1.5 text-gray-500">{f.festivalType}</td>
+                                        <td className="px-2 py-1.5 text-gray-900">{f.region}</td>
+                                        <td className="px-2 py-1.5 text-gray-900">{f.festivalType}</td>
                                         <td className="px-2 py-1.5 text-right">{fmt(f.budgetKrw)}</td>
-                                        <td className="px-2 py-1.5 text-right text-gray-500">{f.similarity}</td>
+                                        <td className="px-2 py-1.5 text-right text-gray-900">{f.similarity}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -444,7 +444,7 @@ function ResultCard({ result }: { result: BudgetEstimateResponse }) {
                     <div className="flex flex-col gap-1">
                         {result.scopeWeightBreakdown.map((s, i) => (
                             <div key={i} className="flex justify-between text-xs">
-                                <span className="text-gray-600">{s.label}</span>
+                                <span className="text-gray-900">{s.label}</span>
                                 <span className="font-medium">{s.weightSharePercent.toFixed(1)}%</span>
                             </div>
                         ))}
@@ -454,8 +454,8 @@ function ResultCard({ result }: { result: BudgetEstimateResponse }) {
 
             {/* raw JSON 토글 */}
             <details className="text-xs">
-                <summary className="cursor-pointer text-gray-400 hover:text-gray-600">raw JSON 보기</summary>
-                <pre className="mt-2 bg-gray-50 p-3 rounded overflow-x-auto text-gray-600">
+                <summary className="cursor-pointer text-gray-900">raw JSON 보기</summary>
+                <pre className="mt-2 bg-gray-50 p-3 rounded overflow-x-auto text-gray-900">
                     {JSON.stringify(result, null, 2)}
                 </pre>
             </details>
@@ -466,7 +466,7 @@ function ResultCard({ result }: { result: BudgetEstimateResponse }) {
 function StatBox({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
     return (
         <div className={`rounded-lg p-3 flex flex-col gap-0.5 ${highlight ? "bg-blue-50 border border-blue-200" : "bg-gray-50"}`}>
-            <span className="text-xs text-gray-500">{label}</span>
+            <span className="text-xs text-gray-900">{label}</span>
             <span className={`text-sm font-bold ${highlight ? "text-blue-700" : "text-gray-800"}`}>{value}</span>
         </div>
     );
@@ -486,7 +486,7 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
         <div className="bg-white rounded-xl shadow p-6 flex flex-col gap-5">
             <div className="flex items-center justify-between">
                 <h3 className="font-bold text-lg">{result.planningYear}년 기획 계획예산</h3>
-                <span className="text-xs text-gray-400">{result.model}</span>
+                <span className="text-xs text-gray-900">{result.model}</span>
             </div>
 
             {/* 참고 데이터 범위 - 정책상 허용 범위(referenceYearFrom~To)가 아니라 실제로 최종 표본에
@@ -494,15 +494,15 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
                 써도 된다"는 허용치일 뿐이고, 데이터가 그 범위를 다 채우지 못하면(예: 2030년 기획인데
                 보유 데이터는 2026년까지) 실제로 쓴 연도만 보여줘야 사용자가 착각하지 않는다. */}
             <div className="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-3 text-sm">
-                <span className="text-gray-500">참고 데이터</span>
+                <span className="text-gray-900">참고 데이터</span>
                 <span className="font-bold text-gray-800">
                     {result.earliestSourceYear !== null && result.latestSourceYear !== null
                         ? `${result.earliestSourceYear}~${result.latestSourceYear}`
                         : "참고 가능한 데이터 없음"}
                 </span>
-                <span className="text-xs text-gray-400">({REFERENCE_POLICY_LABEL[result.appliedReferenceDataPolicy] ?? result.appliedReferenceDataPolicy})</span>
+                <span className="text-xs text-gray-900">({REFERENCE_POLICY_LABEL[result.appliedReferenceDataPolicy] ?? result.appliedReferenceDataPolicy})</span>
                 {result.latestSourceYear !== null && result.latestSourceYear < result.referenceYearTo && (
-                    <span className="text-xs text-gray-400">· 정책상 {result.referenceYearFrom}~{result.referenceYearTo}까지 허용되지만 보유 데이터가 {result.latestSourceYear}년까지뿐이라 그만큼만 사용</span>
+                    <span className="text-xs text-gray-900">· 정책상 {result.referenceYearFrom}~{result.referenceYearTo}까지 허용되지만 보유 데이터가 {result.latestSourceYear}년까지뿐이라 그만큼만 사용</span>
                 )}
             </div>
 
@@ -520,11 +520,11 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
                 <StatBox label="가중 평균" value={fmt(result.weightedAverageBudgetKrw)} />
             </div>
             <div className="flex gap-2 items-center text-sm">
-                <span className="text-gray-500">일반적 범위</span>
+                <span className="text-gray-900">일반적 범위</span>
                 <span className="font-medium">{fmt(result.p25Krw)}</span>
-                <span className="text-gray-400">~</span>
+                <span className="text-gray-900">~</span>
                 <span className="font-medium">{fmt(result.p75Krw)}</span>
-                <span className="text-gray-400 text-xs">(P25~P75, 중앙값 {fmt(result.p50Krw)})</span>
+                <span className="text-gray-900 text-xs">(P25~P75, 중앙값 {fmt(result.p50Krw)})</span>
             </div>
 
             {/* 다년도 사용 정도 */}
@@ -536,7 +536,7 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
                     value={result.effectiveYearCount.toFixed(1)}
                 />
             </div>
-            <p className="text-xs text-gray-400 -mt-3" title="여러 연도의 자료가 얼마나 균형 있게 반영되었는지를 나타냅니다. 특정 연도에 비중이 몰릴수록 실제 연도 수보다 낮아집니다.">
+            <p className="text-xs text-gray-900 -mt-3" title="여러 연도의 자료가 얼마나 균형 있게 반영되었는지를 나타냅니다. 특정 연도에 비중이 몰릴수록 실제 연도 수보다 낮아집니다.">
                 ⓘ 유효 연도 수 = 여러 연도 자료가 얼마나 균형 있게 반영됐는지(특정 연도에 쏠릴수록 실제 연도 수보다 낮아짐)
             </p>
 
@@ -547,21 +547,21 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
                     <div className="flex flex-col gap-1.5 mt-2">
                         {result.yearWeightBreakdown.map((y) => (
                             <div key={y.year} className="flex items-center gap-2 text-xs">
-                                <span className="w-12 text-gray-500">{y.year}</span>
+                                <span className="w-12 text-gray-900">{y.year}</span>
                                 <div className="flex-1 bg-gray-100 rounded h-3 overflow-hidden">
                                     <div
                                         className="bg-emerald-500 h-full rounded"
                                         style={{ width: `${maxWeightShare > 0 ? (y.weightShare / maxWeightShare) * 100 : 0}%` }}
                                     />
                                 </div>
-                                <span className="w-20 text-right text-gray-600">{(y.weightShare * 100).toFixed(1)}% ({y.candidateCount}건)</span>
+                                <span className="w-20 text-right text-gray-900">{(y.weightShare * 100).toFixed(1)}% ({y.candidateCount}건)</span>
                             </div>
                         ))}
                     </div>
                 </details>
             )}
 
-            <div className="flex gap-3 items-center text-xs text-gray-400 flex-wrap">
+            <div className="flex gap-3 items-center text-xs text-gray-900 flex-wrap">
                 <span>fallback: {result.fallbackLevel}</span>
                 <span>평균 유사도: {(result.averageSimilarity * 100).toFixed(1)}%</span>
                 <span>dataQualityV3: {result.dataQualityV3.toFixed(1)}점</span>
@@ -569,8 +569,8 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
 
             {/* raw JSON 토글 */}
             <details className="text-xs">
-                <summary className="cursor-pointer text-gray-400 hover:text-gray-600">raw JSON 보기</summary>
-                <pre className="mt-2 bg-gray-50 p-3 rounded overflow-x-auto text-gray-600">
+                <summary className="cursor-pointer text-gray-900">raw JSON 보기</summary>
+                <pre className="mt-2 bg-gray-50 p-3 rounded overflow-x-auto text-gray-900">
                     {JSON.stringify(result, null, 2)}
                 </pre>
             </details>
