@@ -1,0 +1,527 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { MayoBtn } from "mayoui-react";
+import type { MetadataResponse } from "@/lib/domain/types";
+import {
+    fetchPlanningRecommendations,
+    type PlanningRecommendationResponse,
+} from "@/lib/api/planning-recommendations";
+import type { Recommendation, ReferenceFestival } from "@/lib/planner/types";
+import MonthChart from "./month-chart";
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+const KIND_BADGE: Record<Recommendation["kind"], string> = {
+    VENUE_SHIFT: "장소 전환",
+    TIMING_SHIFT: "시기 이동",
+    KEYWORD_MASHUP: "소재 결합",
+    DURATION_TUNE: "기간 조정",
+    BUDGET_EFFICIENCY: "예산 기준",
+};
+
+function krw(value: number | null): string {
+    if (value === null) return "미상";
+    if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}억원`;
+    if (value >= 10_000) return `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원`;
+    return `${value.toLocaleString("ko-KR")}원`;
+}
+
+function num(value: number | null, suffix = ""): string {
+    return value === null ? "미상" : `${value.toLocaleString("ko-KR")}${suffix}`;
+}
+
+function ReferenceTable({ items }: { items: ReferenceFestival[] }) {
+    if (items.length === 0) return null;
+    return (
+        <div className="border-t border-gray-200 pt-3 mt-4 overflow-x-auto">
+            <p className="text-xs font-medium text-gray-500 mb-2">근거 축제 (실제 데이터)</p>
+            <table className="w-full text-sm border-collapse min-w-[520px]">
+                <thead>
+                    <tr className="text-left text-gray-500">
+                        <th className="py-1.5 pr-3 font-medium">축제명</th>
+                        <th className="py-1.5 pr-3 font-medium">지역</th>
+                        <th className="py-1.5 pr-3 font-medium">시기</th>
+                        <th className="py-1.5 pr-3 font-medium">기간</th>
+                        <th className="py-1.5 pr-3 font-medium text-right">예산</th>
+                        <th className="py-1.5 pr-3 font-medium text-right">방문객</th>
+                        <th className="py-1.5 font-medium text-right">1인당</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {items.map((f, i) => (
+                        <tr key={`${f.festivalName}-${i}`} className="border-t border-gray-100">
+                            <td className="py-1.5 pr-3">{f.festivalName}</td>
+                            <td className="py-1.5 pr-3 text-gray-600">
+                                {f.regionLabel}
+                                {f.district ? ` ${f.district}` : ""}
+                            </td>
+                            <td className="py-1.5 pr-3 text-gray-600">
+                                {f.startMonth === null ? "미상" : `${f.startMonth}월`}
+                            </td>
+                            <td className="py-1.5 pr-3 text-gray-600">{num(f.durationDays, "일")}</td>
+                            <td className="py-1.5 pr-3 text-right">{krw(f.totalBudgetKrw)}</td>
+                            <td className="py-1.5 pr-3 text-right">{num(f.visitors, "명")}</td>
+                            <td className="py-1.5 text-right">{krw(f.costPerVisitorKrw)}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+export default function PlannerPage() {
+    const [metadata, setMetadata] = useState<MetadataResponse | null>(null);
+    const [metaError, setMetaError] = useState<string | null>(null);
+
+    const [planningYear, setPlanningYear] = useState(CURRENT_YEAR + 1);
+    const [regionCode, setRegionCode] = useState("");
+    const [district, setDistrict] = useState("");
+    const [festivalType, setFestivalType] = useState("");
+    const [venueType, setVenueType] = useState("");
+    const [durationDays, setDurationDays] = useState(3);
+    const [startMonth, setStartMonth] = useState<number | "">("");
+    const [useLlm, setUseLlm] = useState(true);
+
+    const [result, setResult] = useState<PlanningRecommendationResponse | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [showWhitespace, setShowWhitespace] = useState(false);
+
+    useEffect(() => {
+        fetch("/api/v1/metadata")
+            .then((r) => r.json())
+            .then((data) => {
+                if (data.message) {
+                    setMetaError(data.message);
+                } else {
+                    setMetadata(data);
+                    setRegionCode(data.regions[0]?.code ?? "");
+                    setFestivalType(data.festivalTypes[0]?.code ?? "");
+                    setVenueType(data.venueTypes[0]?.code ?? "");
+                    setDurationDays(data.duration?.minimum ?? 3);
+                }
+            })
+            .catch((e) => setMetaError(String(e)));
+    }, []);
+
+    const districts = metadata?.districtsByRegion[regionCode] ?? [];
+
+    async function handleSubmit(e: React.FormEvent) {
+        e.preventDefault();
+        setError(null);
+        setResult(null);
+        setLoading(true);
+        try {
+            setResult(
+                await fetchPlanningRecommendations({
+                    planningYear: Number(planningYear),
+                    regionCode,
+                    district: district || undefined,
+                    festivalType,
+                    venueType,
+                    durationDays: Number(durationDays),
+                    startMonth: startMonth === "" ? undefined : Number(startMonth),
+                    useLlm,
+                })
+            );
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    const timingCard = result?.recommendations.find((r) => r.kind === "TIMING_SHIFT");
+    const recommendedMonth = timingCard ? Number(timingCard.id.replace("timing-", "")) : null;
+
+    const regionLabel =
+        metadata?.regions.find((r) => r.code === regionCode)?.displayName ?? regionCode;
+    const typeLabel =
+        metadata?.festivalTypes.find((t) => t.code === festivalType)?.displayName ?? festivalType;
+
+    return (
+        <main className="min-h-screen bg-gray-50 p-8 text-gray-900">
+            <div className="max-w-4xl mx-auto">
+                <h1 className="text-2xl font-bold mb-1">축제 기획 추천</h1>
+                <p className="text-sm text-gray-600 mb-6">
+                    전국 축제 개최 데이터를 분석해, <strong>전국에서는 검증됐지만 우리 지역에는 없는</strong>{" "}
+                    선택지를 찾아 차별화 방향을 제안합니다. 모든 수치는 실제 데이터에서 계산됩니다.
+                </p>
+
+                {metaError && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                        메타데이터를 불러오지 못했습니다: {metaError}
+                    </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow p-6 mb-6">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">기획연도</label>
+                            <input
+                                type="number"
+                                className="border rounded px-3 py-2 text-sm"
+                                min={CURRENT_YEAR}
+                                value={planningYear}
+                                onChange={(e) => setPlanningYear(Number(e.target.value))}
+                            />
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">
+                                희망 개최월 <span className="text-gray-500 font-normal">(선택)</span>
+                            </label>
+                            <select
+                                className="border rounded px-3 py-2 text-sm"
+                                value={startMonth}
+                                onChange={(e) =>
+                                    setStartMonth(e.target.value === "" ? "" : Number(e.target.value))
+                                }
+                            >
+                                <option value="">미정 — 추천받기</option>
+                                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                                    <option key={m} value={m}>
+                                        {m}월
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">광역자치단체</label>
+                            <select
+                                className="border rounded px-3 py-2 text-sm"
+                                value={regionCode}
+                                onChange={(e) => {
+                                    setRegionCode(e.target.value);
+                                    setDistrict("");
+                                }}
+                            >
+                                {metadata?.regions.map((r) => (
+                                    <option key={r.code} value={r.code}>
+                                        {r.displayName}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">
+                                시군구 <span className="text-gray-500 font-normal">(선택)</span>
+                            </label>
+                            <select
+                                className="border rounded px-3 py-2 text-sm"
+                                value={district}
+                                onChange={(e) => setDistrict(e.target.value)}
+                            >
+                                <option value="">전체</option>
+                                {districts.map((d) => (
+                                    <option key={d} value={d}>
+                                        {d}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">축제 유형</label>
+                            <select
+                                className="border rounded px-3 py-2 text-sm"
+                                value={festivalType}
+                                onChange={(e) => setFestivalType(e.target.value)}
+                            >
+                                {metadata?.festivalTypes.map((t) => (
+                                    <option key={t.code} value={t.code}>
+                                        {t.displayName}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">장소 유형</label>
+                            <select
+                                className="border rounded px-3 py-2 text-sm"
+                                value={venueType}
+                                onChange={(e) => setVenueType(e.target.value)}
+                            >
+                                {metadata?.venueTypes.map((v) => (
+                                    <option key={v.code} value={v.code}>
+                                        {v.displayName}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">
+                                개최 일수
+                                {metadata && (
+                                    <span className="text-gray-500 font-normal">
+                                        {" "}
+                                        (최소 {metadata.duration.minimum}일)
+                                    </span>
+                                )}
+                            </label>
+                            <input
+                                type="number"
+                                className="border rounded px-3 py-2 text-sm"
+                                min={metadata?.duration.minimum ?? 1}
+                                value={durationDays}
+                                onChange={(e) => setDurationDays(Number(e.target.value))}
+                            />
+                        </div>
+
+                        <div className="flex items-end">
+                            <label className="flex items-center gap-2 text-sm pb-2">
+                                <input
+                                    type="checkbox"
+                                    checked={useLlm}
+                                    onChange={(e) => setUseLlm(e.target.checked)}
+                                />
+                                AI 기획안 초안도 함께 생성
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="mt-5">
+                        <MayoBtn type="submit" variant="primary" size="md" disabled={loading || !metadata}>
+                            {loading ? "분석 중..." : "추천 받기"}
+                        </MayoBtn>
+                    </div>
+                </form>
+
+                {error && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-6">
+                        {error}
+                    </div>
+                )}
+
+                {result && (
+                    <div className="flex flex-col gap-6">
+                        {/* 코호트 요약 */}
+                        <section className="bg-white rounded-xl shadow p-6">
+                            <h2 className="text-base font-bold mb-1">분석 기준</h2>
+                            <p className="text-xs text-gray-500 mb-4">
+                                {result.datasetYear}년 전국 축제 개최계획 데이터 기준
+                            </p>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                {[
+                                    { label: `전국 ${typeLabel}`, value: result.cohort.nationalSameType },
+                                    { label: `${regionLabel} 전체`, value: result.cohort.region },
+                                    { label: `${regionLabel} ${typeLabel}`, value: result.cohort.regionSameType },
+                                    { label: "동일 유형·장소", value: result.cohort.regionSameTypeSameVenue },
+                                ].map((s) => (
+                                    <div key={s.label}>
+                                        <div className="text-2xl font-bold">{s.value}</div>
+                                        <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+
+                        {/* 포화도 */}
+                        {result.saturation && (
+                            <div
+                                className={`p-4 rounded-lg border text-sm ${
+                                    result.saturation.level === "HIGH"
+                                        ? "bg-red-50 border-red-200 text-red-800"
+                                        : result.saturation.level === "MEDIUM"
+                                          ? "bg-amber-50 border-amber-200 text-amber-900"
+                                          : "bg-blue-50 border-blue-200 text-blue-900"
+                                }`}
+                            >
+                                <p className="font-medium mb-1">
+                                    {result.saturation.level === "HIGH"
+                                        ? "⚠ 포화 위험 높음"
+                                        : result.saturation.level === "MEDIUM"
+                                          ? "· 포화 주의"
+                                          : "· 포화도 낮음"}
+                                </p>
+                                <p>{result.saturation.message}</p>
+                            </div>
+                        )}
+
+                        {/* 월별 분포 */}
+                        <MonthChart
+                            distribution={result.monthDistribution}
+                            targetMonth={startMonth === "" ? null : Number(startMonth)}
+                            recommendedMonth={recommendedMonth}
+                            regionLabel={regionLabel}
+                            typeLabel={typeLabel}
+                        />
+
+                        {/* 추천 카드 */}
+                        <section className="flex flex-col gap-4">
+                            <h2 className="text-lg font-bold">
+                                {result.planningYear}년 기획 추천 {result.recommendations.length}건
+                            </h2>
+
+                            {result.recommendations.length === 0 && (
+                                <p className="text-sm text-gray-600">
+                                    조건에 맞는 추천이 없습니다. 지역이나 유형을 넓혀보세요.
+                                </p>
+                            )}
+
+                            {result.recommendations.map((rec) => (
+                                <article key={rec.id} className="bg-white rounded-xl shadow p-6">
+                                    <div className="flex items-start justify-between gap-4 mb-2">
+                                        <div>
+                                            <span className="inline-block text-[11px] font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-600 mb-2">
+                                                {KIND_BADGE[rec.kind]}
+                                            </span>
+                                            <h3 className="font-bold">{rec.title}</h3>
+                                        </div>
+                                        {rec.kind !== "BUDGET_EFFICIENCY" && (
+                                            <div className="text-right shrink-0">
+                                                <div className="text-xl font-bold">{rec.opportunityScore}</div>
+                                                <div className="text-[10px] text-gray-500">기회점수</div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <p className="text-sm text-gray-600 mb-4">{rec.summary}</p>
+
+                                    {rec.rationale.length > 0 && (
+                                        <ul className="list-disc pl-5 text-sm flex flex-col gap-1 text-gray-700">
+                                            {rec.rationale.map((line, i) => (
+                                                <li key={i}>{line}</li>
+                                            ))}
+                                        </ul>
+                                    )}
+
+                                    <ReferenceTable items={rec.referenceFestivals} />
+                                </article>
+                            ))}
+                        </section>
+
+                        {/* AI 기획안 */}
+                        {result.llmPlan && (
+                            <section className="bg-white rounded-xl shadow p-6">
+                                <div className="flex items-baseline justify-between gap-4 mb-3">
+                                    <h2 className="text-base font-bold">AI 기획안 초안</h2>
+                                    <span className="text-[11px] text-gray-500">{result.llmPlan.model}</span>
+                                </div>
+                                <p className="text-xs text-gray-500 mb-4">
+                                    위 분석 근거만 입력해 생성했습니다. 수치는 모두 위 카드에서 나온 실측값입니다.
+                                </p>
+
+                                {result.llmPlan.concept && (
+                                    <p className="text-sm mb-4 leading-relaxed">{result.llmPlan.concept}</p>
+                                )}
+
+                                {[
+                                    { title: "프로그램 아이디어", items: result.llmPlan.programIdeas },
+                                    { title: "차별화 포인트", items: result.llmPlan.differentiationPoints },
+                                    { title: "유의사항", items: result.llmPlan.cautions },
+                                ]
+                                    .filter((s) => s.items.length > 0)
+                                    .map((s) => (
+                                        <div key={s.title} className="mb-4 last:mb-0">
+                                            <h3 className="text-sm font-medium mb-1.5">{s.title}</h3>
+                                            <ul className="list-disc pl-5 text-sm flex flex-col gap-1 text-gray-700">
+                                                {s.items.map((item, i) => (
+                                                    <li key={i}>{item}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ))}
+                            </section>
+                        )}
+
+                        {/* 화이트스페이스 상세 */}
+                        <section className="bg-white rounded-xl shadow p-6">
+                            <button
+                                type="button"
+                                onClick={() => setShowWhitespace((v) => !v)}
+                                className="text-base font-bold flex items-center gap-2"
+                            >
+                                화이트스페이스 상세
+                                <span className="text-xs font-normal text-gray-500">
+                                    {showWhitespace ? "접기" : "펼치기"}
+                                </span>
+                            </button>
+
+                            {showWhitespace && (
+                                <div className="mt-4 grid gap-6 sm:grid-cols-2">
+                                    {(
+                                        [
+                                            ["장소", result.whitespace.venue],
+                                            ["시기", result.whitespace.month],
+                                            ["기간", result.whitespace.durationBucket],
+                                            ["소재", result.whitespace.keyword],
+                                        ] as const
+                                    ).map(([label, entries]) => (
+                                        <div key={label}>
+                                            <h3 className="text-sm font-medium mb-2">{label}</h3>
+                                            {entries.length === 0 ? (
+                                                <p className="text-xs text-gray-500">근거가 충분한 항목이 없습니다.</p>
+                                            ) : (
+                                                <table className="w-full text-xs">
+                                                    <thead>
+                                                        <tr className="text-left text-gray-500">
+                                                            <th className="py-1 font-medium">항목</th>
+                                                            <th className="py-1 font-medium text-right">전국</th>
+                                                            <th className="py-1 font-medium text-right">지역</th>
+                                                            <th className="py-1 font-medium text-right">기회</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {entries.slice(0, 8).map((e) => (
+                                                            <tr key={e.value} className="border-t border-gray-100">
+                                                                <td className="py-1">{e.label}</td>
+                                                                <td className="py-1 text-right">{e.nationalCount}</td>
+                                                                <td className="py-1 text-right">{e.regionCount}</td>
+                                                                <td className="py-1 text-right font-medium">
+                                                                    {Math.round(e.opportunityScore * 100)}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+
+                        {/* 연동 상태 + 경고 */}
+                        <section className="bg-white rounded-xl shadow p-6">
+                            <h2 className="text-base font-bold mb-3">데이터 연동 상태</h2>
+                            <ul className="text-sm flex flex-col gap-2">
+                                {(
+                                    [
+                                        ["TourAPI 4.0 (축제 상세 프로그램)", result.integrations.tourApi],
+                                        ["지역N문화 (지역 설화·향토자산)", result.integrations.regionalCulture],
+                                        ["AI 기획안 생성", result.integrations.llm],
+                                    ] as const
+                                ).map(([label, status]) => (
+                                    <li key={label} className="flex items-start gap-2">
+                                        <span className="shrink-0">{status.enabled ? "✅" : "⬜"}</span>
+                                        <span>
+                                            <span className={status.enabled ? "" : "text-gray-500"}>{label}</span>
+                                            {status.reason && (
+                                                <span className="block text-xs text-gray-500">{status.reason}</span>
+                                            )}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+
+                            {result.warnings.length > 0 && (
+                                <ul className="mt-4 pt-4 border-t border-gray-200 text-xs text-amber-800 flex flex-col gap-1">
+                                    {result.warnings.map((w, i) => (
+                                        <li key={i}>· {w}</li>
+                                    ))}
+                                </ul>
+                            )}
+                        </section>
+                    </div>
+                )}
+            </div>
+        </main>
+    );
+}
