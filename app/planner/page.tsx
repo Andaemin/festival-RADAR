@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { MayoBtn } from "mayoui-react";
 import type { MetadataResponse } from "@/lib/domain/types";
 import {
+    fetchPlanDraft,
     fetchPlanningRecommendations,
     type PlanningRecommendationResponse,
 } from "@/lib/api/planning-recommendations";
-import type { Recommendation, ReferenceFestival } from "@/lib/planner/types";
+import type { LlmPlanDraft, Recommendation, ReferenceFestival } from "@/lib/planner/types";
 import MonthChart from "./month-chart";
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -89,6 +90,11 @@ export default function PlannerPage() {
     const [loading, setLoading] = useState(false);
     const [showWhitespace, setShowWhitespace] = useState(false);
 
+    // AI 기획안은 통계와 분리해 뒤따라 받는다. 통계는 수십 ms, LLM은 수 초가 걸린다.
+    const [llmPlan, setLlmPlan] = useState<LlmPlanDraft | null>(null);
+    const [llmLoading, setLlmLoading] = useState(false);
+    const [llmError, setLlmError] = useState<string | null>(null);
+
     useEffect(() => {
         fetch("/api/v1/metadata")
             .then((r) => r.json())
@@ -112,20 +118,36 @@ export default function PlannerPage() {
         e.preventDefault();
         setError(null);
         setResult(null);
+        setLlmPlan(null);
+        setLlmError(null);
         setLoading(true);
+
+        const request = {
+            planningYear: Number(planningYear),
+            regionCode,
+            district: district || undefined,
+            festivalType,
+            venueType,
+            durationDays: Number(durationDays),
+            startMonth: startMonth === "" ? undefined : Number(startMonth),
+            useLlm,
+        };
+
         try {
-            setResult(
-                await fetchPlanningRecommendations({
-                    planningYear: Number(planningYear),
-                    regionCode,
-                    district: district || undefined,
-                    festivalType,
-                    venueType,
-                    durationDays: Number(durationDays),
-                    startMonth: startMonth === "" ? undefined : Number(startMonth),
-                    useLlm,
-                })
-            );
+            const stats = await fetchPlanningRecommendations(request);
+            setResult(stats);
+
+            // 통계를 먼저 그린 뒤 기획안을 이어서 받는다. 실패해도 통계는 남는다.
+            if (stats.integrations.llm.enabled) {
+                setLlmLoading(true);
+                fetchPlanDraft(request)
+                    .then((draft) => {
+                        setLlmPlan(draft.llmPlan);
+                        if (!draft.llmPlan && draft.llm.reason) setLlmError(draft.llm.reason);
+                    })
+                    .catch((err) => setLlmError(err instanceof Error ? err.message : String(err)))
+                    .finally(() => setLlmLoading(false));
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -397,37 +419,63 @@ export default function PlannerPage() {
                             ))}
                         </section>
 
-                        {/* AI 기획안 */}
-                        {result.llmPlan && (
+                        {/* AI 기획안 - 통계보다 늦게 도착한다 */}
+                        {(llmLoading || llmPlan || llmError) && (
                             <section className="bg-white rounded-xl shadow p-6">
                                 <div className="flex items-baseline justify-between gap-4 mb-3">
                                     <h2 className="text-base font-bold">AI 기획안 초안</h2>
-                                    <span className="text-[11px] text-gray-500">{result.llmPlan.model}</span>
+                                    {llmPlan && (
+                                        <span className="text-[11px] text-gray-500">{llmPlan.model}</span>
+                                    )}
                                 </div>
-                                <p className="text-xs text-gray-500 mb-4">
-                                    위 분석 근거만 입력해 생성했습니다. 수치는 모두 위 카드에서 나온 실측값입니다.
-                                </p>
 
-                                {result.llmPlan.concept && (
-                                    <p className="text-sm mb-4 leading-relaxed">{result.llmPlan.concept}</p>
+                                {llmLoading && (
+                                    <div className="animate-pulse" aria-live="polite">
+                                        <p className="text-sm text-gray-500 mb-4">
+                                            위 분석 근거로 기획안을 작성하는 중입니다...
+                                        </p>
+                                        <div className="h-3 bg-gray-100 rounded mb-2" />
+                                        <div className="h-3 bg-gray-100 rounded mb-2 w-11/12" />
+                                        <div className="h-3 bg-gray-100 rounded mb-6 w-4/5" />
+                                        <div className="h-3 bg-gray-100 rounded mb-2 w-2/3" />
+                                        <div className="h-3 bg-gray-100 rounded w-3/4" />
+                                    </div>
                                 )}
 
-                                {[
-                                    { title: "프로그램 아이디어", items: result.llmPlan.programIdeas },
-                                    { title: "차별화 포인트", items: result.llmPlan.differentiationPoints },
-                                    { title: "유의사항", items: result.llmPlan.cautions },
-                                ]
-                                    .filter((s) => s.items.length > 0)
-                                    .map((s) => (
-                                        <div key={s.title} className="mb-4 last:mb-0">
-                                            <h3 className="text-sm font-medium mb-1.5">{s.title}</h3>
-                                            <ul className="list-disc pl-5 text-sm flex flex-col gap-1 text-gray-700">
-                                                {s.items.map((item, i) => (
-                                                    <li key={i}>{item}</li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    ))}
+                                {llmError && !llmLoading && (
+                                    <p className="text-sm text-amber-800">
+                                        기획안을 생성하지 못했습니다: {llmError}
+                                    </p>
+                                )}
+
+                                {llmPlan && !llmLoading && (
+                                    <>
+                                        <p className="text-xs text-gray-500 mb-4">
+                                            위 분석 근거만 입력해 생성했습니다. 수치는 모두 위 카드에서 나온 실측값입니다.
+                                        </p>
+
+                                        {llmPlan.concept && (
+                                            <p className="text-sm mb-4 leading-relaxed">{llmPlan.concept}</p>
+                                        )}
+
+                                        {[
+                                            { title: "프로그램 아이디어", items: llmPlan.programIdeas },
+                                            { title: "차별화 포인트", items: llmPlan.differentiationPoints },
+                                            { title: "유의사항", items: llmPlan.cautions },
+                                        ]
+                                            .filter((s) => s.items.length > 0)
+                                            .map((s) => (
+                                                <div key={s.title} className="mb-4 last:mb-0">
+                                                    <h3 className="text-sm font-medium mb-1.5">{s.title}</h3>
+                                                    <ul className="list-disc pl-5 text-sm flex flex-col gap-1 text-gray-700">
+                                                        {s.items.map((item, i) => (
+                                                            <li key={i}>{item}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            ))}
+                                    </>
+                                )}
                             </section>
                         )}
 

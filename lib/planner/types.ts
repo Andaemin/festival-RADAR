@@ -139,9 +139,21 @@ export interface PlanningRecommendationResponse {
     integrations: {
         tourApi: IntegrationStatus;
         localStory: IntegrationStatus;
+        /** LLM 기획안을 이어서 요청할 수 있는지. 실제 생성은 별도 엔드포인트가 담당한다. */
         llm: IntegrationStatus;
     };
+    warnings: string[];
+}
+
+/**
+ * LLM 기획안 응답. 통계 응답과 분리된 엔드포인트가 반환한다.
+ *
+ * 통계 계산은 15ms인데 LLM은 수 초가 걸린다. 한 응답에 묶으면 화면 전체가 LLM을
+ * 기다리게 되므로, 통계를 먼저 그리고 기획안은 뒤따라 채우도록 분리했다.
+ */
+export interface PlanDraftResponse {
     llmPlan: LlmPlanDraft | null;
+    llm: IntegrationStatus;
     warnings: string[];
 }
 

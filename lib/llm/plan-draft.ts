@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { LlmPlanDraft, Recommendation } from "@/lib/planner/types";
 import type { TourApiFestivalDetail } from "@/lib/external/tour-api";
+import type { LocalStory } from "@/lib/external/local-story";
 
 /**
  * 통계 엔진이 만든 근거(evidence)를 받아 기획안 서술로 옮긴다.
@@ -11,10 +12,22 @@ import type { TourApiFestivalDetail } from "@/lib/external/tour-api";
  *
  * 필요한 환경변수:
  *   OPENAI_API_KEY  OpenAI 인증키
- *   OPENAI_MODEL    (선택) 사용할 모델. 기본값 gpt-5.5
+ *   OPENAI_MODEL    (선택) 사용할 모델. 기본값 gpt-5.4-mini
+ *
+ * 모델 선택 근거(2026-08-22 실측, 동일 프롬프트 1,591 입력 토큰):
+ *   gpt-5.5              24.3s  (추론 토큰 512)
+ *   gpt-5.5 effort=low   12.4s
+ *   gpt-5.4-mini          4.2s  ← 기본값
+ *   gpt-4.1               5.2s
+ * gpt-5.5는 추론 단계 때문에 6배 가까이 느리다. 출력 품질은 gpt-5.4-mini도
+ * 근거 수치를 정확히 인용하고 핵심 제안이 같아, 응답성을 택했다.
+ * 더 촘촘한 서술이 필요하면 OPENAI_MODEL=gpt-5.5 로 바꾸면 된다.
  */
 
-const DEFAULT_MODEL = "gpt-5.5";
+const DEFAULT_MODEL = "gpt-5.4-mini";
+
+/** 출력이 길어져 지연이 늘어나는 것을 막는다. 스키마상 이 정도면 충분하다. */
+const MAX_COMPLETION_TOKENS = 2000;
 
 export function isLlmEnabled(): boolean {
     return !!process.env.OPENAI_API_KEY;
@@ -28,6 +41,7 @@ export interface PlanDraftInput {
     saturationMessage: string | null;
     medianCostPerVisitorKrw: number | null;
     tourApiDetails: TourApiFestivalDetail[];
+    localStories: LocalStory[];
 }
 
 const SYSTEM_PROMPT = `당신은 한국 지역축제 기획 컨설턴트입니다.
@@ -35,8 +49,9 @@ const SYSTEM_PROMPT = `당신은 한국 지역축제 기획 컨설턴트입니�
 규칙:
 1. 제공된 "분석 근거"에 있는 수치만 사용하세요. 건수·예산·방문객 수를 새로 지어내지 마세요.
 2. 근거에 없는 통계를 언급해야 할 것 같으면, 수치 없이 정성적으로만 쓰세요.
-3. 한국 지자체 축제 기획 실무에 맞는 구체적인 프로그램을 제안하세요.
-4. 반드시 아래 JSON 스키마로만 답하세요. 다른 텍스트를 덧붙이지 마세요.
+3. 근거에 없는 지역 특성·유산·설화를 지어내지 마세요. 제공된 것만 인용하세요.
+4. 한국 지자체 축제 기획 실무에 맞는 구체적인 프로그램을 제안하세요.
+5. 반드시 아래 JSON 스키마로만 답하세요. 다른 텍스트를 덧붙이지 마세요.
 
 {
   "concept": "축제 콘셉트 한 문단",
@@ -84,6 +99,14 @@ function buildUserPrompt(input: PlanDraftInput): string {
         }
     }
 
+    if (input.localStories.length > 0) {
+        lines.push(`## 이 지역의 문화 자산·설화 (지역 스토리 제공자)`);
+        for (const story of input.localStories) {
+            lines.push(`- ${story.title}${story.summary ? `: ${story.summary.slice(0, 300)}` : ""}`);
+        }
+        lines.push("");
+    }
+
     return lines.join("\n");
 }
 
@@ -94,6 +117,7 @@ export async function generatePlanDraft(input: PlanDraftInput): Promise<LlmPlanD
     const completion = await client.chat.completions.create({
         model,
         response_format: { type: "json_object" },
+        max_completion_tokens: MAX_COMPLETION_TOKENS,
         messages: [
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: buildUserPrompt(input) },
