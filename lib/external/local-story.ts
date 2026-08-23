@@ -1,5 +1,5 @@
 /**
- * 지역 스토리 제공자(provider) 클라이언트 — **현재 연결된 백엔드 없음**
+ * 지역 스토리 제공자(provider) — 기본 백엔드: 국가유산청 (lib/external/heritage.ts)
  *
  * ┌─ 이 모듈이 필요한 이유 ────────────────────────────────────────────────┐
  * │ 추천 엔진(lib/planner)은 "전어: 전국 6건 / 경북 0건" 같은 수치 근거는   │
@@ -22,6 +22,10 @@
  *      - 2025-11-08자 문의 답변에서 연합회가 API 사용법을 안내하지 않고
  *        "행사정보는 한국관광공사 소관"이라며 타 기관으로 안내했다.
  *    → 오픈API가 유지보수되지 않는 것으로 판단하고 연결을 포기했다.
+ *
+ * ✅ 2026-08-23: 국가유산청 국가유산 정보 Open API로 대체 완료.
+ *    **인증키가 필요 없고**(data.go.kr 항목은 유형이 LINK), 지역별 지정문화유산의
+ *    명칭·소재지·설명 텍스트를 준다. 별도 설정 없이 기본 동작한다.
  *
  * ✅ 그래서 이 파일은 특정 서비스가 아니라 **교체 가능한 어댑터**로 남겨둔다.
  *    응답 스키마를 하드코딩하지 않고 findItemArray/FIELD_CANDIDATES로 탐색하므로,
@@ -50,6 +54,9 @@
  *         https://www.culture.go.kr/data/openapi/openapiInfo.do
  */
 
+import { REGION_DISPLAY, Region } from "@/lib/domain/enums";
+import { fetchRegionHeritage } from "./heritage";
+
 export interface LocalStory {
     title: string;
     /** 설화·유래 본문. LLM 프롬프트에 근거로 주입할 텍스트. */
@@ -58,14 +65,20 @@ export interface LocalStory {
     sourceUrl: string | null;
 }
 
-export function isLocalStoryEnabled(): boolean {
+/** 커스텀 제공자(환경변수)가 설정되어 있으면 그쪽을 우선한다. */
+function hasCustomProvider(): boolean {
     return !!process.env.LOCAL_STORY_SERVICE_KEY && !!process.env.LOCAL_STORY_BASE_URL;
 }
 
-/** 백엔드가 연결되지 않은 사유. UI가 "왜 이 섹션이 비었는지" 설명하는 데 쓴다. */
-export const LOCAL_STORY_DISABLED_REASON =
-    "지역 스토리 제공자가 연결되지 않았습니다. 지역N문화 오픈API는 폐기된 것으로 확인되어(2026-08-22), " +
-    "국가유산청 전국 지정문화재 현황 등으로 교체가 필요합니다. lib/external/local-story.ts 주석을 참고하세요.";
+/** 국가유산청이 키 없이 동작하므로 항상 사용 가능하다. */
+export function isLocalStoryEnabled(): boolean {
+    return true;
+}
+
+/** 화면에 어떤 출처를 쓰고 있는지 밝힌다. */
+export function localStoryProviderName(): string {
+    return hasCustomProvider() ? "사용자 지정 제공자" : "국가유산청 국가유산 정보";
+}
 
 /**
  * 응답 필드 이름 후보. 제공자마다 다르므로 앞에서부터 먼저 걸리는 값을 쓴다.
@@ -119,10 +132,19 @@ function buildRequestUrl(keyword: string, limit: number): string {
     return url.toString();
 }
 
-export async function searchLocalStories(keyword: string, limit = 5): Promise<LocalStory[]> {
-    if (!isLocalStoryEnabled()) return [];
+/**
+ * 지역의 문화 자산·설화를 가져온다.
+ *
+ * 기본은 국가유산청(키 불필요). LOCAL_STORY_BASE_URL이 설정되어 있으면 그 제공자를 쓴다.
+ */
+export async function searchLocalStories(region: Region, limit = 5): Promise<LocalStory[]> {
+    if (!hasCustomProvider()) {
+        return fetchRegionHeritage(region, limit);
+    }
 
-    const res = await fetch(buildRequestUrl(keyword, limit), { next: { revalidate: 86400 } });
+    const res = await fetch(buildRequestUrl(REGION_DISPLAY[region] ?? region, limit), {
+        next: { revalidate: 86400 },
+    });
     const text = await res.text();
 
     if (!res.ok) throw new Error(`지역 스토리 API HTTP ${res.status}: ${text.slice(0, 200)}`);

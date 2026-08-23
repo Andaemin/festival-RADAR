@@ -169,9 +169,9 @@ export async function fetchFestivalDetail(
             contentId: summary.contentId,
             contentTypeId: CONTENT_TYPE_FESTIVAL,
         }).catch(() => [] as unknown[]),
+        // KorService2에서는 overviewYN 파라미터가 제거됐다(보내면 INVALID_REQUEST_PARAMETER_ERROR).
         callTourApi("detailCommon2", {
             contentId: summary.contentId,
-            overviewYN: "Y",
         }).catch(() => [] as unknown[]),
     ]);
 
@@ -191,40 +191,95 @@ export async function fetchFestivalDetail(
 }
 
 /**
+ * TourAPI 축제 목록 캐시.
+ *
+ * 전국 축제가 900건 남짓이고 거의 바뀌지 않는다. 요청마다 목록을 다시 받으면
+ * 일 1,000건 한도를 금방 태우므로 프로세스 메모리에 들고 있는다.
+ */
+const globalForTour = globalThis as unknown as { tourFestivalList?: TourApiFestivalSummary[] };
+
+export function invalidateTourFestivalList(): void {
+    globalForTour.tourFestivalList = undefined;
+}
+
+async function loadFestivalList(planningYear: number): Promise<TourApiFestivalSummary[]> {
+    if (globalForTour.tourFestivalList) return globalForTour.tourFestivalList;
+
+    // 기획연도 기준 전후를 함께 훑는다. 지역 필터를 걸면 누락이 커서(경북 2026년은 0건)
+    // 전국을 받아 이름으로 맞춘다.
+    const years = [planningYear - 2, planningYear - 1];
+    const collected: TourApiFestivalSummary[] = [];
+    for (const y of years) {
+        collected.push(...(await searchFestivals({ eventStartDate: `${y}0101`, numOfRows: 1000 })));
+    }
+
+    const deduped = [...new Map(collected.map((f) => [f.contentId, f])).values()];
+    globalForTour.tourFestivalList = deduped;
+    return deduped;
+}
+
+/** 회차·연도·상투어를 걷어낸 비교용 이름. */
+function normalizeTitle(s: string): string {
+    return s
+        .normalize("NFC")
+        .replace(/[\s()（）]/g, "")
+        .replace(/제?\s*\d+\s*(회|주년|차)/g, "")
+        .replace(/(19|20)\d{2}년?/g, "")
+        .replace(/축제|페스티벌|페스타|축전/g, "");
+}
+
+/**
+ * 두 축제명이 같은 축제인지 판정한다.
+ *
+ * 단순 부분문자열 매칭은 오탐이 심하다 - "한강페스티벌"이 정규화되면 "한강"만 남아
+ * "로맨틱 한강 크리스마스 마켓"까지 걸린다. 틀린 축제의 프로그램 텍스트가 LLM
+ * 프롬프트에 들어가면 그 자체가 할루시네이션 원인이 되므로, 재현율을 조금 포기하고
+ * 정확도를 택한다(실측 33.6% -> 29.8%, 대신 표본 오탐 제거).
+ */
+function isSameFestival(a: string, b: string): boolean {
+    if (a === b) return true;
+    const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+    return short.length >= 5 && long.includes(short) && long.length - short.length <= 4;
+}
+
+/**
  * 축제명으로 TourAPI 상세 내용을 찾아 붙인다.
- * 이름이 정확히 일치하지 않는 경우가 많아(회차·연도 표기 차이) 느슨하게 매칭한다.
+ * 이름 표기가 달라(회차·연도) 정규화 후 엄격 매칭한다.
  */
 export async function enrichByFestivalName(
     festivalNames: string[],
-    region: Region | undefined,
+    _region: Region | undefined,
     planningYear: number
 ): Promise<Map<string, TourApiFestivalDetail>> {
     const result = new Map<string, TourApiFestivalDetail>();
     if (!isTourApiEnabled() || festivalNames.length === 0) return result;
 
-    // 기획연도 기준으로 1년치를 훑는다.
-    const summaries = await searchFestivals({
-        region,
-        eventStartDate: `${planningYear - 1}0101`,
-        numOfRows: 100,
-    });
+    const summaries = (await loadFestivalList(planningYear)).map((s) => ({
+        summary: s,
+        norm: normalizeTitle(s.title),
+    }));
 
-    const normalize = (s: string) => s.replace(/\s+/g, "").replace(/제?\d+회/g, "").replace(/(19|20)\d{2}년?/g, "");
-
+    const matched: { name: string; summary: TourApiFestivalSummary }[] = [];
     for (const name of festivalNames) {
-        const target = normalize(name);
-        const hit = summaries.find((s) => {
-            const t = normalize(s.title);
-            return t.includes(target) || target.includes(t);
-        });
-        if (!hit) continue;
-
-        try {
-            result.set(name, await fetchFestivalDetail(hit));
-        } catch {
-            // 상세 조회 1건 실패가 전체 추천을 막지 않도록 조용히 건너뛴다.
-        }
+        const target = normalizeTitle(name);
+        if (target.length < 2) continue;
+        const hit = summaries.find((s) => isSameFestival(target, s.norm));
+        if (hit) matched.push({ name, summary: hit.summary });
     }
 
+    // 상세 조회는 건당 2회 호출이라 병렬로 돌리되, 1건 실패가 전체를 막지 않게 한다.
+    const details = await Promise.all(
+        matched.map(async (m) => {
+            try {
+                return { name: m.name, detail: await fetchFestivalDetail(m.summary) };
+            } catch {
+                return null;
+            }
+        })
+    );
+
+    for (const d of details) {
+        if (d) result.set(d.name, d.detail);
+    }
     return result;
 }

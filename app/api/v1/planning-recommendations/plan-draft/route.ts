@@ -122,7 +122,7 @@ async function collectLocalStories(region: Region, warnings: string[]): Promise<
     if (!isLocalStoryEnabled()) return [];
 
     try {
-        const stories = await searchLocalStories(REGION_DISPLAY[region] ?? region);
+        const stories = await searchLocalStories(region);
         if (stories.length === 0) warnings.push("지역 스토리 제공자에서 관련 스토리를 찾지 못했습니다.");
         return stories;
     } catch (e) {

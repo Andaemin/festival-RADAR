@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FestivalType, Region, VenueType } from "@/lib/domain/enums";
 import { isTourApiEnabled } from "@/lib/external/tour-api";
-import { LOCAL_STORY_DISABLED_REASON, isLocalStoryEnabled } from "@/lib/external/local-story";
+import { isLocalStoryEnabled, localStoryProviderName } from "@/lib/external/local-story";
 import { isLlmEnabled } from "@/lib/llm/plan-draft";
 import { generateRecommendations } from "@/lib/planner/recommendation-engine";
 import { loadPlannerCorpus } from "@/lib/planner/record-source";
@@ -67,8 +67,8 @@ export async function POST(request: NextRequest) {
 
         // 지역 스토리도 LLM 프롬프트에만 쓰이므로 조회는 plan-draft 라우트가 한다.
         const localStory: IntegrationStatus = isLocalStoryEnabled()
-            ? { enabled: true, reason: null }
-            : { enabled: false, reason: LOCAL_STORY_DISABLED_REASON };
+            ? { enabled: true, reason: `출처: ${localStoryProviderName()}` }
+            : { enabled: false, reason: "지역 스토리 제공자를 사용할 수 없습니다." };
 
         // ── LLM 가용 여부 ────────────────────────────────────────────────
         // 실제 생성은 POST /api/v1/planning-recommendations/plan-draft 가 담당한다.
