@@ -3,6 +3,7 @@ import { FESTIVAL_TYPE_DISPLAY, FestivalType, REGION_DISPLAY, Region, VenueType 
 import { enrichByFestivalName, isTourApiEnabled, type TourApiFestivalDetail } from "@/lib/external/tour-api";
 import { isLocalStoryEnabled, searchLocalStories, type LocalStory } from "@/lib/external/local-story";
 import { generatePlanDraft, isLlmEnabled } from "@/lib/llm/plan-draft";
+import { fetchRegionVisitorProfile, isVisitorStatsEnabled, type VisitorProfile } from "@/lib/external/visitor-stats";
 import { generateRecommendations } from "@/lib/planner/recommendation-engine";
 import { loadPlannerCorpus } from "@/lib/planner/record-source";
 import { IntegrationStatus, PlanDraftResponse, PlanningRecommendationRequest } from "@/lib/planner/types";
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
 
     if (!isLlmEnabled()) {
         const llm: IntegrationStatus = { enabled: false, reason: "OPENAI_API_KEY가 설정되지 않았습니다." };
-        return NextResponse.json({ llmPlan: null, llm, warnings } satisfies PlanDraftResponse);
+        return NextResponse.json({ llmPlan: null, llm, visitorProfile: null, warnings } satisfies PlanDraftResponse);
     }
 
     try {
@@ -68,9 +69,17 @@ export async function POST(request: NextRequest) {
 
         // 외부 재료 수집은 서로 독립적이므로 병렬로 돌린다. 어느 쪽이 실패해도
         // 기획안 생성 자체는 진행한다(재료가 줄어들 뿐이다).
-        const [tourApiDetails, localStories] = await Promise.all([
+        // 방문자 통계는 시기 추천월(없으면 희망월) 기준으로 본다. 미래 월은 데이터가
+        // 없으므로 항상 "직전 완결 연도"를 쓴다.
+        const timingCard = engine.recommendations.find((r) => r.kind === "TIMING_SHIFT");
+        const statsMonth =
+            startMonth ?? (timingCard ? Number(timingCard.id.replace("timing-", "")) : new Date().getMonth() + 1);
+        const statsYear = new Date().getFullYear() - 1;
+
+        const [tourApiDetails, localStories, visitorProfile] = await Promise.all([
             collectTourApiDetails(engine.recommendations, regionCode as Region, planningYear, warnings),
             collectLocalStories(regionCode as Region, warnings),
+            collectVisitorProfile(regionCode as Region, statsYear, statsMonth, warnings),
         ]);
 
         const llmPlan = await generatePlanDraft({
@@ -82,11 +91,13 @@ export async function POST(request: NextRequest) {
             medianCostPerVisitorKrw: engine.budgetEfficiency.medianCostPerVisitorKrw,
             tourApiDetails,
             localStories,
+            visitorProfile,
         });
 
         return NextResponse.json({
             llmPlan,
             llm: { enabled: true, reason: null },
+            visitorProfile,
             warnings,
         } satisfies PlanDraftResponse);
     } catch (error) {
@@ -95,6 +106,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
             llmPlan: null,
             llm: { enabled: false, reason },
+            visitorProfile: null,
             warnings,
         } satisfies PlanDraftResponse);
     }
@@ -128,5 +140,21 @@ async function collectLocalStories(region: Region, warnings: string[]): Promise<
     } catch (e) {
         warnings.push(`지역 스토리 조회에 실패했습니다: ${e instanceof Error ? e.message : String(e)}`);
         return [];
+    }
+}
+
+async function collectVisitorProfile(
+    region: Region,
+    year: number,
+    month: number,
+    warnings: string[]
+): Promise<VisitorProfile | null> {
+    if (!isVisitorStatsEnabled()) return null;
+
+    try {
+        return await fetchRegionVisitorProfile(region, year, month);
+    } catch (e) {
+        warnings.push(`방문자 통계 조회에 실패했습니다: ${e instanceof Error ? e.message : String(e)}`);
+        return null;
     }
 }

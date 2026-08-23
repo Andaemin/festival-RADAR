@@ -8,7 +8,7 @@ import {
     fetchPlanningRecommendations,
     type PlanningRecommendationResponse,
 } from "@/lib/api/planning-recommendations";
-import type { LlmPlanDraft, Recommendation, ReferenceFestival } from "@/lib/planner/types";
+import type { LlmPlanDraft, Recommendation, ReferenceFestival, VisitorProfile } from "@/lib/planner/types";
 import MonthChart from "./month-chart";
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -92,6 +92,7 @@ export default function PlannerPage() {
 
     // AI 기획안은 통계와 분리해 뒤따라 받는다. 통계는 수십 ms, LLM은 수 초가 걸린다.
     const [llmPlan, setLlmPlan] = useState<LlmPlanDraft | null>(null);
+    const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
     const [llmLoading, setLlmLoading] = useState(false);
     const [llmError, setLlmError] = useState<string | null>(null);
 
@@ -119,6 +120,7 @@ export default function PlannerPage() {
         setError(null);
         setResult(null);
         setLlmPlan(null);
+        setVisitorProfile(null);
         setLlmError(null);
         setLoading(true);
 
@@ -143,6 +145,7 @@ export default function PlannerPage() {
                 fetchPlanDraft(request)
                     .then((draft) => {
                         setLlmPlan(draft.llmPlan);
+                        setVisitorProfile(draft.visitorProfile);
                         if (!draft.llmPlan && draft.llm.reason) setLlmError(draft.llm.reason);
                     })
                     .catch((err) => setLlmError(err instanceof Error ? err.message : String(err)))
@@ -418,6 +421,45 @@ export default function PlannerPage() {
                                 </article>
                             ))}
                         </section>
+
+                        {/* 방문자 구성 - 통신사 실측값. LLM 생성물이 아니다 */}
+                        {visitorProfile && (
+                            <section className="bg-white rounded-xl shadow p-6">
+                                <h2 className="text-base font-bold mb-1">방문자 구성</h2>
+                                <p className="text-xs text-gray-500 mb-4">
+                                    한국관광공사 통신사 기반 실측치 · {visitorProfile.year}년 {visitorProfile.month}월
+                                </p>
+
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+                                    {[
+                                        {
+                                            label: "외지인·외국인 비율",
+                                            value: `${(visitorProfile.outsiderRatio * 100).toFixed(1)}%`,
+                                        },
+                                        {
+                                            label: "전국 평균",
+                                            value: `${(visitorProfile.nationalOutsiderRatio * 100).toFixed(1)}%`,
+                                        },
+                                        { label: "17개 시도 중", value: `${visitorProfile.outsiderRatioRank}위` },
+                                        {
+                                            label: "월 총 방문",
+                                            value: `${Math.round(visitorProfile.totalVisitors / 10000).toLocaleString("ko-KR")}만명`,
+                                        },
+                                    ].map((s) => (
+                                        <div key={s.label}>
+                                            <div className="text-xl font-bold">{s.value}</div>
+                                            <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <p className="text-sm text-gray-700">
+                                    {visitorProfile.outsiderRatio >= visitorProfile.nationalOutsiderRatio
+                                        ? "전국 평균보다 외부 유입이 많은 지역입니다. 외지 관광객을 겨냥한 기획이 통할 여지가 있습니다."
+                                        : "전국 평균보다 외부 유입이 적은 지역입니다. 외지 관광객 유치보다 지역 주민 참여형 기획이 현실적일 수 있습니다."}
+                                </p>
+                            </section>
+                        )}
 
                         {/* AI 기획안 - 통계보다 늦게 도착한다 */}
                         {(llmLoading || llmPlan || llmError) && (

@@ -1,4 +1,7 @@
 import { FestivalType, Region, VenueType } from "@/lib/domain/enums";
+import type { VisitorProfile } from "@/lib/external/visitor-stats";
+
+export type { VisitorProfile };
 
 /** 추천 엔진이 사용하는 축제 1건의 경량 표현. FestivalRecord에서 필요한 필드만 뽑는다. */
 export interface PlannerRecord {
@@ -154,6 +157,11 @@ export interface PlanningRecommendationResponse {
 export interface PlanDraftResponse {
     llmPlan: LlmPlanDraft | null;
     llm: IntegrationStatus;
+    /**
+     * 통신사 실측 방문자 프로필. LLM이 만든 값이 아니라 API 집계값이다.
+     * 외부 API 호출이 필요해 통계 응답이 아닌 이쪽에 함께 실어 보낸다.
+     */
+    visitorProfile: VisitorProfile | null;
     warnings: string[];
 }
 

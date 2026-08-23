@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { LlmPlanDraft, Recommendation } from "@/lib/planner/types";
 import type { TourApiFestivalDetail } from "@/lib/external/tour-api";
 import type { LocalStory } from "@/lib/external/local-story";
+import type { VisitorProfile } from "@/lib/external/visitor-stats";
 
 /**
  * 통계 엔진이 만든 근거(evidence)를 받아 기획안 서술로 옮긴다.
@@ -42,6 +43,7 @@ export interface PlanDraftInput {
     medianCostPerVisitorKrw: number | null;
     tourApiDetails: TourApiFestivalDetail[];
     localStories: LocalStory[];
+    visitorProfile: VisitorProfile | null;
 }
 
 const SYSTEM_PROMPT = `당신은 한국 지역축제 기획 컨설턴트입니다.
@@ -97,6 +99,16 @@ function buildUserPrompt(input: PlanDraftInput): string {
             if (d.program) lines.push(`프로그램: ${d.program.slice(0, 500)}`);
             lines.push("");
         }
+    }
+
+    if (input.visitorProfile) {
+        const v = input.visitorProfile;
+        lines.push(
+            `### 방문자 구성 (통신사 실측, ${v.year}년 ${v.month}월)`,
+            `${v.regionLabel} 외지인·외국인 비율 ${(v.outsiderRatio * 100).toFixed(1)}% ` +
+                `(전국 평균 ${(v.nationalOutsiderRatio * 100).toFixed(1)}%, 17개 시도 중 ${v.outsiderRatioRank}위)`,
+            ``
+        );
     }
 
     if (input.localStories.length > 0) {
