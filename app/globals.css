@@ -3,6 +3,21 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* MayoUI 테마 변수 */
+  --mayo-bg: #ffffff;
+  --mayo-bg-subtle: #f9fafb;
+  --mayo-bg-muted: #f3f4f6;
+  --mayo-surface: #ffffff;
+  --mayo-text: #111827;
+  --mayo-text-secondary: #374151;
+  --mayo-text-muted: #6b7280;
+  --mayo-text-placeholder: #9ca3af;
+  --mayo-border: #e5e7eb;
+  --mayo-border-strong: #d1d5db;
+  --mayo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --mayo-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --mayo-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
 }
 
 @theme inline {
@@ -16,6 +31,20 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --mayo-bg: #0a0a0a;
+    --mayo-bg-subtle: #141414;
+    --mayo-bg-muted: #1f1f1f;
+    --mayo-surface: #141414;
+    --mayo-text: #ededed;
+    --mayo-text-secondary: #d1d5db;
+    --mayo-text-muted: #9ca3af;
+    --mayo-text-placeholder: #6b7280;
+    --mayo-border: #2a2a2a;
+    --mayo-border-strong: #3a3a3a;
+    --mayo-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --mayo-shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+    --mayo-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
   }
 }
 
