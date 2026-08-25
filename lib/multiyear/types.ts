@@ -33,6 +33,11 @@ export interface MultiYearQuery {
   typeTokens: Set<FestivalType>;
   venueType: VenueType | null;
   durationDays: number | null;
+  /** PHASE 9C-A(Series Shadow Integration) — optional. estimateForPlanning/selectFinalSample/
+   *  computeCoreStats 등 기존 baseline 계산 코드는 이 필드를 전혀 읽지 않는다(추가해도 기존
+   *  recommendation pipeline 동작이 바뀌지 않음) - series signal(lib/multiyear-series/*)만
+   *  이 값을 소비한다. 생략하거나 빈 문자열이면 series 계산 자체를 건너뛴다. */
+  festivalName?: string;
 }
 
 export interface MultiYearSimilarityScore {

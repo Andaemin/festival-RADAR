@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { BudgetEstimateResponse, MetadataResponse } from "@/lib/domain/types";
 import { estimateMultiYearBudget, MultiYearBudgetEstimateResponse } from "@/lib/api/multiyear-budget-estimates";
+import { resolveSeriesDisplayState, SERIES_FALLBACK_MESSAGE } from "@/lib/multiyear-series/planning-ui-display";
 
 export default function AssistantTesterPage() {
     const [metadata, setMetadata] = useState<MetadataResponse | null>(null);
@@ -21,6 +22,7 @@ export default function AssistantTesterPage() {
     const [loading, setLoading] = useState(false);
 
     // 다년도 계획예산 폼 상태
+    const [myFestivalName, setMyFestivalName] = useState("");
     const [myRegionCode, setMyRegionCode] = useState("");
     const [myDistrict, setMyDistrict] = useState("");
     const [myFestivalTypes, setMyFestivalTypes] = useState<string[]>([]);
@@ -105,6 +107,7 @@ export default function AssistantTesterPage() {
                 durationDays: Number(myDurationDays),
                 planningYear: Number(planningYear),
                 referenceDataPolicy,
+                festivalName: myFestivalName.trim() || undefined,
             });
             setMyResult(data);
         } catch (e) {
@@ -231,6 +234,18 @@ export default function AssistantTesterPage() {
                                 className="border rounded px-3 py-2 text-sm w-32"
                                 value={planningYear}
                                 onChange={(e) => setPlanningYear(Number(e.target.value))}
+                            />
+                        </div>
+
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">축제명 <span className="text-gray-900 font-normal">(선택)</span></label>
+                            <p className="text-xs text-gray-900 mb-1">기존에 개최된 축제라면 축제명을 입력하면 과거 동일 축제의 예산 이력을 함께 반영합니다.</p>
+                            <input
+                                type="text"
+                                className="border rounded px-3 py-2 text-sm"
+                                placeholder="예: 한강페스티벌 (신규 축제거나 축제명을 모르면 비워두세요)"
+                                value={myFestivalName}
+                                onChange={(e) => setMyFestivalName(e.target.value)}
                             />
                         </div>
 
@@ -481,6 +496,15 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
     const fmt = (n: number) => new Intl.NumberFormat("ko-KR").format(n) + "원";
     const downgraded = result.requestedReferenceDataPolicy !== result.appliedReferenceDataPolicy;
     const maxWeightShare = Math.max(0, ...result.yearWeightBreakdown.map((y) => y.weightShare));
+    const seriesDisplay = resolveSeriesDisplayState(result.estimateBasis, result.seriesSignal);
+    // PHASE 9D 4/5절 — P25~P75는 Series predictive range가 아니라 항상 Peer(유사 축제) empirical
+    // range이고, dataQualityV3/confidence류 지표도 Series confidence가 아니라 peer sample/evidence
+    // quality다. "예상 예산 범위"처럼 Series estimate의 uncertainty interval로 오해될 표현은 쓰지
+    // 않는다. rangeBasis/dataQualityBasis로 gate해서 실제 API 근거와 문구가 어긋나지 않게 한다.
+    const rangeLabel = result.rangeBasis === "PEER_EMPIRICAL_P25_P75" ? "유사 축제 참고 범위" : "참고 범위";
+    const rangeDescription =
+        result.rangeBasis === "PEER_EMPIRICAL_P25_P75" ? "비슷한 지역·유형·기간의 축제들이 형성하는 예산 분포입니다." : null;
+    const dataQualityLabel = result.dataQualityBasis === "PEER_SAMPLE" ? "유사 축제 데이터 품질" : "데이터 품질";
 
     return (
         <div className="bg-white rounded-xl shadow p-6 flex flex-col gap-5">
@@ -533,18 +557,38 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
                 </div>
             )}
 
+            {/* PHASE 9D — seriesDisplay는 result.estimateBasis(실제 계산 근거)로 gate되어 있어서
+                "Series MATCHED인데 Peer처럼 보이거나 fallback인데 Series 반영됐다고 표시"가
+                구조적으로 발생할 수 없다(lib/multiyear-series/planning-ui-display.ts 참고). */}
+            {seriesDisplay.kind === "SERIES_APPLIED" && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
+                    🔁 동일 축제(&ldquo;{seriesDisplay.canonicalName}&rdquo;) 과거 예산 이력 {seriesDisplay.historyCount}회 반영
+                    {seriesDisplay.historicalYears.length > 0 && (
+                        <span className="text-xs text-emerald-700"> ({seriesDisplay.historicalYears.join(", ")}년)</span>
+                    )}
+                </div>
+            )}
+            {(seriesDisplay.kind === "UNMATCHED" || seriesDisplay.kind === "AMBIGUOUS" || seriesDisplay.kind === "NO_VALID_HISTORY") && (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
+                    ℹ️ {SERIES_FALLBACK_MESSAGE[seriesDisplay.kind]}
+                </div>
+            )}
+
             {/* 핵심 수치 - "예측값"이 아니라 계획 판단 도구라는 의미를 명칭에 반영 */}
             <div className="grid grid-cols-3 gap-3">
                 <StatBox label="데이터 기준 예산" value={fmt(result.estimatedBudgetKrw)} />
                 <StatBox label="기획 추천 예산" value={fmt(result.recommendedBudgetKrw)} highlight />
                 <StatBox label="가중 평균" value={fmt(result.weightedAverageBudgetKrw)} />
             </div>
-            <div className="flex gap-2 items-center text-sm">
-                <span className="text-gray-900">일반적 범위</span>
-                <span className="font-medium">{fmt(result.p25Krw)}</span>
-                <span className="text-gray-900">~</span>
-                <span className="font-medium">{fmt(result.p75Krw)}</span>
-                <span className="text-gray-900 text-xs">(P25~P75, 중앙값 {fmt(result.p50Krw)})</span>
+            <div className="flex flex-col gap-0.5">
+                <div className="flex gap-2 items-center text-sm">
+                    <span className="text-gray-900">{rangeLabel}</span>
+                    <span className="font-medium">{fmt(result.p25Krw)}</span>
+                    <span className="text-gray-900">~</span>
+                    <span className="font-medium">{fmt(result.p75Krw)}</span>
+                    <span className="text-gray-900 text-xs">(P25~P75, 중앙값 {fmt(result.p50Krw)})</span>
+                </div>
+                {rangeDescription && <p className="text-xs text-gray-900">{rangeDescription}</p>}
             </div>
 
             {/* 다년도 사용 정도 */}
@@ -584,7 +628,7 @@ function MultiYearResultCard({ result }: { result: MultiYearBudgetEstimateRespon
             <div className="flex gap-3 items-center text-xs text-gray-900 flex-wrap">
                 <span>fallback: {result.fallbackLevel}</span>
                 <span>평균 유사도: {(result.averageSimilarity * 100).toFixed(1)}%</span>
-                <span>dataQualityV3: {result.dataQualityV3.toFixed(1)}점</span>
+                <span>{dataQualityLabel}: {result.dataQualityV3.toFixed(1)}점</span>
             </div>
 
             {/* raw JSON 토글 */}

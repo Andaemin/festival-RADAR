@@ -1,5 +1,6 @@
 import { computeCoreStats, selectFinalSample, toPredictionCandidate } from "./baseline-estimator";
 import { selectMultiYearCandidatesV1 } from "./candidate-selector-v1";
+import { computeFinalPeerRecommendation } from "./final-recommendation";
 import { MultiYearPublicationStatusValue, ReferenceDataPolicy, resolveEffectivePolicy } from "./reference-data-policy";
 import { filterReferencePool } from "./reference-year-filter";
 import { MultiYearPredictionCandidate, MultiYearQuery, MultiYearRecordLite } from "./types";
@@ -86,9 +87,15 @@ function emptyPlanningResult(
  * planningYear를 직접 받는 일반화된 예측 진입점. Spring
  * MultiYearBacktestService.estimateForPlanning을 그대로 포팅한다. predictForQueryLegacy2026(S0,
  * targetYear=2026 고정)과 완전히 독립적인 경로다 - 서로 다른 selector(V1)/다른 연도 범위(publication
- * policy 기반)를 쓴다. 유사도/기간보정/winsorize/threshold+상위N건컷/가중통계/legacy confidence/v3는
- * baseline-estimator.ts의 selectFinalSample+computeCoreStats를 그대로 재사용한다 - 이 함수 자체는
- * 새 계산식을 추가하지 않는다.
+ * policy 기반)를 쓴다. 유사도/기간보정/winsorize/threshold+상위N건컷/가중통계/v3는
+ * baseline-estimator.ts의 selectFinalSample+computeCoreStats를 그대로 재사용한다(estimated/p25/
+ * p50/p60/p75/sampleCount 등 - 이 함수 자체는 이 산출물들에 새 계산식을 추가하지 않는다).
+ *
+ * PHASE 19-A: recommendedBudgetKrw만은 예외다 - `computeCoreStats`가 돌려주는
+ * `stats.recommendedBudget`(legacy confidence-derived contingency 포함, predictForQueryLegacy2026
+ * Spring parity 전용)을 쓰지 않고 `computeFinalPeerRecommendation(stats.estimated, stats.p60)`로
+ * 별도 계산한다(Phase 17/18/18-B 결론: legacy confidence는 individual risk를 설명하지 못하므로
+ * Planning V1은 P60 floor만 conservatism으로 쓴다). legacy S0는 이 변경과 무관하게 기존 그대로다.
  *
  * @param requestedPolicy 호출자가 요청한 정책. INCLUDE_PUBLISHED_SAME_YEAR인데 planningYear
  *                        데이터셋이 아직 PUBLISHED_PLAN_COMPLETE로 표시돼 있지 않으면 자동으로
@@ -133,6 +140,11 @@ export function estimateForPlanning(
 
   const weights = fs.finalSample.map((c) => c.score.weight);
   const stats = computeCoreStats(fs, weights, query.district !== null);
+  // PHASE 19-A: stats.recommendedBudget(legacy confidence-derived contingency 포함, 레거시
+  // S0/predictForQueryLegacy2026 Spring parity 전용)은 Planning V1에서 더 이상 쓰지 않는다 -
+  // 최종 recommendation은 computeFinalPeerRecommendation(estimated/p60만 입력, confidence 없음)로
+  // 별도 계산한다. estimated/p25/p50/p60/p75/sampleCount 등 estimator 산출물 자체는 전혀 안 바뀐다.
+  const recommendedBudgetKrw = computeFinalPeerRecommendation(stats.estimated, stats.p60);
 
   const sampleRecords = fs.finalSample.map((c) => c.record);
   const distinctYearsUsed = new Set(sampleRecords.map((r) => r.datasetYear)).size;
@@ -155,7 +167,7 @@ export function estimateForPlanning(
     referencePoolLatestYear,
     estimatedBudgetKrw: Math.round(stats.estimated),
     weightedAverageBudgetKrw: Math.round(stats.weightedAverage),
-    recommendedBudgetKrw: Math.round(stats.recommendedBudget),
+    recommendedBudgetKrw: Math.round(recommendedBudgetKrw),
     p25Krw: Math.round(stats.p25),
     p50Krw: Math.round(stats.p50),
     p60Krw: Math.round(stats.p60),

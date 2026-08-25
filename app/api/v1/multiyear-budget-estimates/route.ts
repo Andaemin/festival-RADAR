@@ -8,6 +8,12 @@ import { loadAllMultiYearRecords } from "@/lib/multiyear/record-loader";
 import { ReferenceDataPolicy, resolveEffectivePolicy } from "@/lib/multiyear/reference-data-policy";
 import { filterReferencePool } from "@/lib/multiyear/reference-year-filter";
 import { MultiYearQuery } from "@/lib/multiyear/types";
+import { applySeriesPlanningSemantics } from "@/lib/multiyear-series/apply-planning-semantics";
+import { getMultiYearDataRevision } from "@/lib/multiyear-series/data-revision";
+import { computePlanningReliability, EMPTY_FROZEN_SERIES_MODEL } from "@/lib/multiyear-series/reliability";
+import { getCachedFrozenSeriesModel, getCachedSeriesRecords, getCachedVolatilityThreshold } from "@/lib/multiyear-series/runtime-cache";
+import { computeSeriesSignal, SERIES_SIGNAL_NOT_REQUESTED, SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
+import { FrozenSeriesModel } from "@/lib/multiyear-series/types";
 
 /**
  * 다년도(2017~) Planning Assistant API - Phase 5에서 Spring parity(84/84 golden fixture)까지
@@ -61,18 +67,27 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // PHASE 9C-A(Series Shadow Integration): festivalName은 optional이다 - 없으면 아래 모든 series
+  // 관련 계산/쿼리를 건너뛰고, estimatedBudgetKrw/recommendedBudgetKrw/P25~P75/confidence 등
+  // 기존 응답 필드는 이 파라미터가 추가되기 전과 100% 동일하게 나온다(회귀 테스트로 확인).
+  const festivalName = typeof body.festivalName === "string" ? body.festivalName.trim() || undefined : undefined;
+
   const query: MultiYearQuery = {
     region: regionCode as Region,
     district: body.district?.trim() || null,
     typeTokens: new Set(festivalTypes as FestivalType[]),
     venueType: venueType as VenueType,
     durationDays,
+    festivalName,
   };
 
   try {
-    const [allRecords, publicationStatusByYear] = await Promise.all([
+    // PHASE 9C-A.1: festivalName이 없으면 dataRevision 조회조차 하지 않는다(series 비활성 요청은
+    // 이 Phase 이전과 완전히 동일한 쿼리만 나간다).
+    const [allRecords, publicationStatusByYear, dataRevision] = await Promise.all([
       loadAllMultiYearRecords(prisma),
       loadPublicationStatusByYear(prisma),
+      festivalName ? getMultiYearDataRevision(prisma) : Promise.resolve<number | null>(null),
     ]);
 
     // reference pool 0건 판정은 반드시 "실제로 적용될 정책"을 먼저 확정한 뒤 그 정책 기준으로
@@ -95,8 +110,74 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // estimateForPlanning은 festivalName을 전혀 읽지 않는다 - P25/P50/P60/P75/weightedAverage/
+    // sampleCount/dataQualityV3/fallbackLevel 등 peer evidence/statistics는 이 Phase에서도
+    // 절대 수정하지 않는다(아래에서 result를 그대로 spread한다). series signal은 그 결과와
+    // 완전히 무관하게 별도로 계산한다.
     const result = estimateForPlanning(query, planningYear, requestedPolicy, allRecords, publicationStatusByYear);
-    return NextResponse.json({ model: MULTIYEAR_PLANNING_MODEL, ...result });
+
+    // PHASE 9C-A.1: FrozenSeriesModel은 target(festivalName)과 무관하다 - (dataRevision,
+    // effectiveTrainingThroughYear) 단위로 process-local 캐시에서 재사용한다(동일 키에 대한
+    // 동시 요청은 in-flight Promise를 공유해 buildFrozenSeriesModel을 중복 실행하지 않는다).
+    //
+    // PHASE 19-B: reliability(computePlanningReliability)도 이 model/threshold를 그대로 재사용한다
+    // - festivalName이 없으면 seriesSignal이 NOT_REQUESTED로 고정되므로 model/threshold는
+    // computePlanningReliability의 LOW 분기에서 전혀 읽히지 않는다(EMPTY_FROZEN_SERIES_MODEL/
+    // threshold=null을 그대로 둬도 안전 - reliability.ts 참고). 이 두 변수를 조건부로만 채우고
+    // computePlanningReliability는 아래에서 딱 한 번, 무조건 호출한다 - route.ts가 "festivalName
+    // 없으면 LOW"라는 판정 로직을 별도로 다시 만들지 않기 위함이다.
+    let seriesSignal: SeriesSignalResponse = SERIES_SIGNAL_NOT_REQUESTED;
+    let seriesModelForReliability: FrozenSeriesModel = EMPTY_FROZEN_SERIES_MODEL;
+    let volatilityThreshold: number | null = null;
+    if (festivalName && dataRevision !== null) {
+      const allSeriesRecords = await getCachedSeriesRecords(prisma, dataRevision);
+      const model = await getCachedFrozenSeriesModel(allSeriesRecords, dataRevision, planningYear);
+      seriesSignal = computeSeriesSignal(festivalName, query.region, query.district, query.typeTokens, planningYear, model);
+      seriesModelForReliability = model;
+      const thresholdResult = await getCachedVolatilityThreshold(allSeriesRecords, dataRevision, planningYear);
+      volatilityThreshold = thresholdResult.threshold;
+    }
+
+    // PHASE 9C-C: Phase 9C-B에서 확정한 semantics를 순수 함수로 배선한다 - series MATCHED(+VALID
+    // history)일 때만 estimatedBudgetKrw/recommendedBudgetKrw를 series 값으로 교체하고, 그 외
+    // 모든 경우(NOT_REQUESTED/UNMATCHED/AMBIGUOUS/NO_VALID_HISTORY)는 peer 값 그대로다.
+    // P25/P50/P60/P75/weightedAverage/sampleCount/dataQualityV3/confidence는 이 함수가 아예
+    // 손대지 않는다 - `...result`로 그대로 흘려보낸다.
+    const applied = applySeriesPlanningSemantics(
+      { estimatedBudgetKrw: result.estimatedBudgetKrw, recommendedBudgetKrw: result.recommendedBudgetKrw, p60Krw: result.p60Krw },
+      seriesSignal
+    );
+
+    // PHASE 19-B: reliability는 Phase 19-A production 함수를 그대로 호출한다 - route.ts는 재계산
+    // 로직을 만들지 않는다. numeric legacy confidence/dataQualityV3는 이 계산에 전혀 관여하지
+    // 않는다(computePlanningReliability 시그니처 자체에 그런 인자가 없다).
+    const reliability = computePlanningReliability(
+      seriesSignal,
+      festivalName ?? "",
+      query.region,
+      query.district,
+      query.typeTokens,
+      planningYear,
+      seriesModelForReliability,
+      volatilityThreshold
+    );
+
+    return NextResponse.json({
+      model: MULTIYEAR_PLANNING_MODEL,
+      ...result,
+      estimatedBudgetKrw: applied.estimatedBudgetKrw,
+      recommendedBudgetKrw: applied.recommendedBudgetKrw,
+      estimateBasis: applied.estimateBasis,
+      recommendationBasis: applied.recommendationBasis,
+      rangeBasis: applied.rangeBasis,
+      dataQualityBasis: applied.dataQualityBasis,
+      seriesSignal,
+      // PHASE 19-B — additive 신규 필드. legacy dataQualityV3/confidence류와 이름·의미 모두
+      // 분리된 사용자 신뢰도 표시용 필드(HIGH/MEDIUM/LOW + 설명 문구) - 기존 필드는 하나도
+      // 지우거나 바꾸지 않았다.
+      reliabilityTier: reliability.tier,
+      reliabilityReason: reliability.reasonText,
+    });
   } catch (error) {
     console.error("[POST /api/v1/multiyear-budget-estimates]", error);
     return NextResponse.json({ message: "다년도 계획예산 추정 중 오류가 발생했습니다." }, { status: 500 });

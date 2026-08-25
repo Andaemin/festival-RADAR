@@ -7,6 +7,19 @@
  * 시나리오 B(2026을 임시 PARTIAL로 내려 downgrade를 재현)는 실제 DB의 publication status를
  * 바꾸지 않고, 그 행만 in-memory로 override한 lookup을 써서 재현한다.
  *
+ * PHASE 19-B Part 7 — `recommendedBudget`은 더 이상 이 fixture의 acceptance criterion이
+ * 아니다(informational only). Phase 19-A에서 Planning V1의 recommendedBudget이
+ * legacy confidence-derived contingency에서 `max(estimatedBudget, P60)`으로 바뀌었는데, 이
+ * Spring fixture는 옛(contingency 포함) 공식 기준으로 만들어졌기 때문이다. **이 fixture를
+ * 임의로 재생성하거나 수정하지 않는다**(Spring 쪽에서 다시 만들어야 하는 값 - 이 저장소 범위
+ * 밖) - 대신 검증기의 역할만 둘로 명확히 나눴다:
+ *   - estimator parity(estimatedBudget/weightedAverage/p25/p50/p75/sampleCount/
+ *     distinctYearsUsed/effectiveYearCount/fallbackLevel/averageSimilarity/dataQualityV3/
+ *     yearWeightBreakdown 등) → 계속 hard failure(exit 1) 기준으로 검증한다. Phase 19-A/19-B
+ *     모두 estimator를 전혀 안 건드렸으므로 이 항목들은 여전히 84/84 일치해야 한다.
+ *   - legacy recommendation parity(recommendedBudget) → `checkInformational`로 별도 집계해서
+ *     리포트에는 표시하되, exit code/실패 판정에는 관여하지 않는다.
+ *
  * 실행: npx tsx scripts/verify-multiyear-planning-estimate.ts [--file <csv-path>]
  */
 import "dotenv/config";
@@ -152,7 +165,11 @@ async function main() {
   console.log("실제 publication status:", [...realStatusMap.entries()]);
 
   const fieldCounts: Record<string, { pass: number; fail: number }> = {};
+  // PHASE 19-B Part 7 — legacy recommendation parity 전용 집계. fieldCounts와 완전히 분리해서
+  // exactFail 판정에 절대 섞이지 않게 한다(아래 informationalMismatches도 mismatches와 별도로 쌓는다).
+  const informationalCounts: Record<string, { pass: number; fail: number }> = {};
   const mismatches: Mismatch[] = [];
+  const informationalMismatches: Mismatch[] = [];
   let rowsFullyMatched = 0;
 
   const bump = (field: string, pass: boolean) => {
@@ -189,6 +206,15 @@ async function main() {
         mismatches.push({ row, field, expected: String(expected), actual: String(actual) });
       }
     };
+    /** PHASE 19-B Part 7 — legacy recommendation parity 전용. fieldCounts/mismatches/rowOk(=exit
+     *  code)에 전혀 관여하지 않는다 - "옛 Spring 공식과 지금 값이 다르다"를 보고만 하고 실패
+     *  처리는 하지 않는다. */
+    const checkInformational = (field: string, expected: unknown, actual: unknown) => {
+      const ok = String(expected) === String(actual);
+      informationalCounts[field] ??= { pass: 0, fail: 0 };
+      informationalCounts[field][ok ? "pass" : "fail"]++;
+      if (!ok) informationalMismatches.push({ row, field, expected: String(expected), actual: String(actual) });
+    };
 
     checkExact("appliedPolicy", row.appliedPolicy, result.appliedReferenceDataPolicy);
     checkExact("referenceYearFrom", row.referenceYearFrom, result.referenceYearFrom);
@@ -198,7 +224,7 @@ async function main() {
     checkExact("sampleCount", row.sampleCount, result.sampleCount);
     checkExact("distinctYearsUsed", row.distinctYearsUsed, result.distinctYearsUsed);
     checkExact("fallbackLevel", row.fallbackLevel, result.fallbackLevel);
-    checkExact("recommendedBudget", row.recommendedBudget, result.recommendedBudgetKrw);
+    checkInformational("recommendedBudget(legacy, PHASE 19-A부터 acceptance criterion 아님)", row.recommendedBudget, result.recommendedBudgetKrw);
     checkExact("p75", row.p75, result.p75Krw);
 
     checkNumeric("effectiveYearCount", row.effectiveYearCount, result.effectiveYearCount);
@@ -240,12 +266,22 @@ async function main() {
   }
 
   console.log("");
-  console.log("── 필드별 결과 ──────────────────────────────");
+  console.log("── 필드별 결과(estimator parity - acceptance criterion) ──────────────────────────────");
   for (const [field, c] of Object.entries(fieldCounts)) {
     console.log(`${c.fail === 0 ? "✅" : "❌"} ${field.padEnd(28)} pass=${c.pass} fail=${c.fail}`);
   }
   console.log("");
-  console.log(`행 전체 일치: ${rowsFullyMatched} / ${rows.length}`);
+  console.log("── 필드별 결과(legacy recommendation parity - 정보용, 실패 판정에 미포함) ──────────");
+  for (const [field, c] of Object.entries(informationalCounts)) {
+    console.log(`${c.fail === 0 ? "✅" : "ℹ️ "} ${field.padEnd(60)} pass=${c.pass} fail=${c.fail}`);
+  }
+  if (informationalMismatches.length > 0) {
+    console.log(
+      `   (PHASE 19-A부터 Planning V1 recommendedBudget = max(estimatedBudget, P60) - 이 Spring fixture는 재생성하지 않았으므로 위 fail은 "회귀"가 아니라 예상된 의도적 divergence다.)`
+    );
+  }
+  console.log("");
+  console.log(`행 전체 일치(estimator parity 기준): ${rowsFullyMatched} / ${rows.length}`);
 
   // 시나리오별 요약
   const byScenario: Record<string, number> = {};
@@ -254,14 +290,26 @@ async function main() {
 
   if (mismatches.length > 0) {
     console.log("");
-    console.log(`불일치 샘플 (최대 20건 / 전체 ${mismatches.length}건):`);
+    console.log(`불일치 샘플(estimator parity, 최대 20건 / 전체 ${mismatches.length}건):`);
     for (const m of mismatches.slice(0, 20)) {
       console.log(
         `  [${m.row.scenario}/${m.row.region}/${m.row.festivalType}/${m.row.venueType}/${m.row.durationDays}/planningYear=${m.row.planningYear}] ${m.field}: expected=${m.expected} actual=${m.actual}`
       );
     }
   }
+  if (informationalMismatches.length > 0) {
+    console.log("");
+    console.log(`불일치 샘플(legacy recommendation parity, 정보용, 최대 5건 / 전체 ${informationalMismatches.length}건):`);
+    for (const m of informationalMismatches.slice(0, 5)) {
+      console.log(
+        `  [${m.row.scenario}/${m.row.region}/${m.row.festivalType}/${m.row.venueType}/${m.row.durationDays}/planningYear=${m.row.planningYear}] ${m.field}: expected(legacy)=${m.expected} actual(현재)=${m.actual}`
+      );
+    }
+  }
 
+  // PHASE 19-B Part 7 — informationalCounts(recommendedBudget)는 fieldCounts에 아예 들어가지
+  // 않으므로 이 exactFail 판정은 자동으로 estimator parity에만 반응한다 - 별도 제외 목록에
+  // "recommendedBudget"을 추가할 필요가 없다(애초에 이 루프가 도는 대상이 아니게 됐다).
   const exactFail = Object.entries(fieldCounts).some(
     ([f, c]) => !["effectiveYearCount", "averageSimilarity", "dataQualityV3", "estimatedBudget", "weightedAverage", "p25", "p50", "yearWeightBreakdown_shares", "yearWeightBreakdown_sumTo1"].includes(f) && c.fail > 0
   );
