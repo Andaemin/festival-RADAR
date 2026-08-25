@@ -2,6 +2,8 @@ import { FESTIVAL_TYPE_DISPLAY, FestivalType, REGION_DISPLAY, Region, VENUE_TYPE
 import { summarizeBudgetEfficiency } from "./budget-efficiency";
 import { toReferenceFestival } from "./reference";
 import { buildMonthDistribution, evaluateSaturation, findLeastSaturatedMonths } from "./saturation";
+import { buildKeywordSeasonality, describeSeason, fitsMonth } from "./seasonality";
+import { ClimateNormals, describeMonthClimate } from "./climate-normals";
 import {
     CohortSummary,
     PlannerRecord,
@@ -25,6 +27,11 @@ function byVisitorsDesc(a: PlannerRecord, b: PlannerRecord): number {
 export interface EngineInput {
     request: PlanningRecommendationRequest;
     all: PlannerRecord[];
+    /**
+     * 기상청 30년 평년값. 시기 카드에 기후 경고를 덧붙이는 데만 쓴다.
+     * 없으면 경고 문장이 빠질 뿐 추천은 그대로 나온다(./climate-normals.ts).
+     */
+    climate?: ClimateNormals;
 }
 
 export interface EngineOutput {
@@ -37,7 +44,7 @@ export interface EngineOutput {
     warnings: string[];
 }
 
-export function generateRecommendations({ request, all }: EngineInput): EngineOutput {
+export function generateRecommendations({ request, all, climate }: EngineInput): EngineOutput {
     const region = request.regionCode as Region;
     const festivalType = request.festivalType as FestivalType;
     const venueType = request.venueType as VenueType;
@@ -69,6 +76,8 @@ export function generateRecommendations({ request, all }: EngineInput): EngineOu
     }
 
     const whitespace = analyzeWhitespace({ national: nationalSameType, region: regionSameType });
+    // 소재의 제철. 시기 카드와 소재 카드가 어긋나지 않게 하는 데 쓴다(./seasonality.ts).
+    const seasonality = buildKeywordSeasonality(all);
     const monthDistribution = buildMonthDistribution(all, region, festivalType);
     const budgetEfficiency = summarizeBudgetEfficiency(
         regionSameType.length >= 8 ? regionSameType : nationalSameType
@@ -121,11 +130,16 @@ export function generateRecommendations({ request, all }: EngineInput): EngineOu
             id: `timing-${quiet.month}`,
             kind: "TIMING_SHIFT",
             title: `${quiet.month}월 개최를 검토하세요`,
-            summary: `${regionLabel}의 ${typeLabel} 축제 기준으로 ${quiet.month}월은 경쟁이 ${quiet.regionSameTypeCount}건으로 가장 적습니다. 전국적으로는 ${quiet.nationalCount}건이 열려 비수기가 아닌 것도 확인됩니다.`,
+            summary: `${quiet.month}월은 전국 축제의 ${(quiet.nationalShare * 100).toFixed(1)}%가 열리는 시기인데, ${regionLabel}의 ${typeLabel} 축제는 ${quiet.regionSameTypeCount}건뿐입니다. 전국 계절 흐름대로라면 ${Math.round(quiet.expectedCount)}건쯤 있었을 자리입니다.`,
             rationale: [
                 currentText,
                 `${quiet.month}월 ${regionLabel} 전체 축제는 ${quiet.regionCount}건, 그중 ${typeLabel}은 ${quiet.regionSameTypeCount}건입니다.`,
-                `전국 ${quiet.month}월 개최 축제가 ${quiet.nationalCount}건이므로, 관객이 없는 시기가 아니라 이 지역에서만 비어 있는 시기입니다.`,
+                // 절대 건수가 아니라 전국 계절성 대비로 고른 달이다(./saturation.ts).
+                `전국 ${quiet.month}월 개최 축제 ${quiet.nationalCount}건(전체의 ${(quiet.nationalShare * 100).toFixed(1)}%)으로 성립하는 시기이며, ${regionLabel}은 기대치 ${Math.round(quiet.expectedCount)}건보다 ${Math.abs(Math.round(quiet.surplus))}건 적습니다.`,
+                // 기후 경고. 특이사항이 없는 달이면 문장이 붙지 않는다.
+                ...(climate
+                    ? [describeMonthClimate(climate, region, quiet.month)].filter((x): x is string => x !== null)
+                    : []),
             ],
             opportunityScore: pct(
                 1 - quiet.regionSameTypeCount / Math.max(1, cohort.regionSameType)
@@ -135,8 +149,11 @@ export function generateRecommendations({ request, all }: EngineInput): EngineOu
     }
 
     // ── 3. 소재 결합형 (매시업) ───────────────────────────────────────────
+    // 소재는 **시기 카드가 고른 달에 성립하는 것**만 후보로 둔다. 시기 카드가 없으면
+    // 희망월을 기준으로 본다. 제철을 모르는 소재는 걸러지지 않는다(seasonality.ts 참고).
+    const plannedMonth = quiet?.month ?? targetMonth;
     const importedKeyword: WhitespaceAxisEntry | undefined = whitespace.keyword.find(
-        (k) => k.regionCount === 0
+        (k) => k.regionCount === 0 && fitsMonth(seasonality, k.value, plannedMonth)
     );
     if (importedKeyword) {
         // 지역 정체성 키워드: 유형과 무관하게 이 지역에서 가장 자주 쓰이는 소재.
@@ -170,6 +187,8 @@ export function generateRecommendations({ request, all }: EngineInput): EngineOu
                 ...(localKeyword
                     ? [`"${localKeyword[0]}"은 ${regionLabel} 축제 ${localKeyword[1]}건에서 이미 검증된 지역 소재입니다.`]
                     : []),
+                // 제철이 확인된 소재만 문장이 붙는다. LLM이 시기를 잘못 잡는 것을 막는다.
+                ...[describeSeason(seasonality, importedKeyword.value)].filter((x): x is string => x !== null),
             ],
             opportunityScore: pct(importedKeyword.opportunityScore),
             referenceFestivals: proof.map(toReferenceFestival),
