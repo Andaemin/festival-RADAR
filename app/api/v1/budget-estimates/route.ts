@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { BudgetEstimateRequest } from "@/lib/domain/types";
 import { FestivalType, Region, VenueType } from "@/lib/domain/enums";
 import { estimateBudget } from "@/lib/services/budget-estimator";
-import { prisma } from "@/lib/db/prisma";
+import { getLatestDatasetYear, loadFestivalRecords } from "@/lib/services/festival-record-source";
 
 export async function POST(request: NextRequest) {
   let body: BudgetEstimateRequest;
@@ -35,9 +35,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // 최신 연도의 CONFIRMED 예산 레코드 전체 로드
-    const latestYear = await prisma.festivalRecord.aggregate({ _max: { datasetYear: true } });
-    const datasetYear = latestYear._max.datasetYear;
+    // 최신 연도의 예산 확정분만 쓴다(다년도 원장 기준. 옛 CONFIRMED = budgetQualityFlag VALID).
+    // 전 연도를 넣으면 추정 결과가 달라지므로 의미를 그대로 유지한다 - 다년도 추정은
+    // lib/multiyear/*가 따로 담당한다.
+    const datasetYear = await getLatestDatasetYear();
 
     if (!datasetYear) {
       return NextResponse.json(
@@ -46,27 +47,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const records = await prisma.festivalRecord.findMany({
-      where: { datasetYear, budgetStatus: "CONFIRMED" },
-      select: {
-        id: true,
-        datasetYear: true,
-        festivalName: true,
-        region: true,
-        administrativeDistrict: true,
-        festivalType: true,
-        venueType: true,
-        durationDays: true,
-        totalBudgetKrw: true,
-      },
-    });
-
-    const yearPool = records.map((r) => ({
-      ...r,
-      region: r.region as Region,
-      festivalType: r.festivalType as FestivalType,
-      venueType: r.venueType as VenueType,
-    }));
+    const yearPool = await loadFestivalRecords({ datasetYear, budgetValidOnly: true });
 
     const result = estimateBudget(body, yearPool);
     return NextResponse.json(result);

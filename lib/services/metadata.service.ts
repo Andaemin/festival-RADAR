@@ -1,39 +1,17 @@
 import { FESTIVAL_TYPE_DISPLAY, FestivalType, REGION_DISPLAY, Region, VENUE_TYPE_DISPLAY, VenueType } from "@/lib/domain/enums";
 import { MetadataResponse } from "@/lib/domain/types";
-import { prisma } from "@/lib/db/prisma";
+import { getLatestDatasetYear, loadDistrictsByRegion } from "./festival-record-source";
 
 const DURATION_MINIMUM = 2;
 const DURATION_MAXIMUM_RECOMMENDED = 180;
 
 export async function getMetadata(): Promise<MetadataResponse> {
-  // 최신 datasetYear 조회
-  const latestBatch = await prisma.festivalRecord.aggregate({
-    _max: { datasetYear: true },
-  });
-  const datasetYear = latestBatch._max.datasetYear ?? 0;
-
-  // 시군구 목록: 최신 연도 데이터에서 지역별로 묶어서 추출
-  const records =
-    datasetYear === 0
-      ? []
-      : await prisma.festivalRecord.findMany({
-          where: { datasetYear },
-          select: { region: true, administrativeDistrict: true },
-        });
-
-  const districtsByRegion: Record<string, string[]> = {};
-  for (const r of records) {
-    if (!r.administrativeDistrict) continue;
-    const key = r.region as string;
-    if (!districtsByRegion[key]) districtsByRegion[key] = [];
-    if (!districtsByRegion[key].includes(r.administrativeDistrict)) {
-      districtsByRegion[key].push(r.administrativeDistrict);
-    }
-  }
-  // 각 지역의 시군구 목록 정렬
-  for (const key of Object.keys(districtsByRegion)) {
-    districtsByRegion[key].sort();
-  }
+  // 출처는 다년도 원장(MultiYearFestivalRecord)이다. 시군구 목록은 전 연도를 훑어
+  // 플래너 코퍼스(2017~2026)와 선택지 범위를 맞춘다 - ./festival-record-source.ts 참고.
+  const [datasetYear, districtsByRegion] = await Promise.all([
+    getLatestDatasetYear(),
+    loadDistrictsByRegion(),
+  ]);
 
   return {
     regions: Object.values(Region).map((r) => ({ code: r, displayName: REGION_DISPLAY[r] })),
