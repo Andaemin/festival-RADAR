@@ -27,3 +27,6 @@ logs/
 
 # 축제 데이터 엑셀 파일 (개인정보 포함 가능)
 /prisma/data/
+
+# Phase 연구/검증용 CSV (repository root만 대상 - 다른 위치의 CSV는 무시하지 않음)
+/phase*.csv

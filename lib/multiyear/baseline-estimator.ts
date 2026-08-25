@@ -73,6 +73,22 @@ export interface FinalSample {
   finalSample: MultiYearScoredCandidate[];
 }
 
+/**
+ * PHASE 29 — Peer candidate의 exact-weight-tie를 DB row order와 무관하게 결정적으로 정렬하기
+ * 위한 immutable source-lineage key. `sourceSha256`(원본 연도별 엑셀 파일 해시) + `sourceSheet` +
+ * `sourceRow`(6자리 zero-pad로 문자열 비교 시 숫자 크기 순서와 일치하게 함)만 쓴다 - budget/
+ * duration/최신연도 등 모델 의미를 담는 필드는 절대 쓰지 않는다(Phase 28 audit "10절" 원칙).
+ *
+ * 두 필드(sourceSheet, sourceRow)는 `MultiYearFestivalRecord`에서 not-null 컬럼이고,
+ * sourceSha256은 필수(non-optional) `importBatch` 관계를 통해 항상 존재한다(schema 확인 완료,
+ * Phase 29 3절) - null fallback이 필요 없다. 전체 10,198건에서 duplicate 0건 확인됨
+ * (scripts/phase28-peer-determinism-audit.ts 12절, scripts/verify-multiyear-stable-key.ts로
+ * regression 유지).
+ */
+export function stableCandidateOrderKey(record: MultiYearRecordLite): string {
+  return `${record.sourceSha256}|${record.sourceSheet}|${String(record.sourceRow).padStart(6, "0")}`;
+}
+
 /** select(trainingPool, query) -> selection 시그니처. V0(selectMultiYearCandidates)뿐 아니라
  *  V1(selectMultiYearCandidatesV1) 등 어떤 전략을 넣어도 이후 채점 단계는 절대 안 바뀐다 -
  *  Spring MultiYearCandidateSelectionStrategy와 동일한 역할. */
@@ -122,12 +138,24 @@ export function selectFinalSample(
     return { record: candidate, score, adjustedBudgetKrw, winsorizedBudgetKrw, originLevel };
   });
 
-  // Array.prototype.sort는 ES2019+에서 stable 정렬이 보장된다 - weight가 같은 후보끼리는
-  // selection.candidates의 원래(선정) 순서가 그대로 유지된다. Java Stream.sorted도 stable이므로
-  // 이 tie-break 동작이 Spring 코드와 동일하다.
+  // PHASE 29 — weight가 exact tie일 때 DB row 순서(orderBy id asc, reimport마다 재발급되는
+  // autoincrement)에 의존하지 않도록 stableCandidateOrderKey로 결정적 2차 정렬을 한다.
+  // Array.prototype.sort는 ES2019+에서 stable 정렬이 보장되므로, 예전에는 "weight가 같은
+  // 후보끼리는 입력 배열 순서가 그대로 유지된다(Java Stream.sorted와 동일)"는 성질에 기댔었다 -
+  // 하지만 Phase 28 감사에서 이 입력 배열 순서 자체가 DB autoincrement id 순서에서 오고, id는
+  // reimport마다 재발급될 수 있어 논리적으로 동일한 데이터에서도 최종 estimate가 달라질 수
+  // 있음이 실측으로 확인됐다(Peer target의 82.94%가 top-50 cutoff에서 tie가 갈릴 수 있었음).
+  // 이 secondary key는 similarity/weight 계산에는 전혀 관여하지 않고 "동률을 어떻게 배열할지"만
+  // 결정한다 - 정확도를 높이기 위한 feature가 아니다.
   const finalSample = scored
     .filter((c) => c.score.similarity >= cfg.similarityMinThreshold)
-    .sort((a, b) => b.score.weight - a.score.weight)
+    .sort((a, b) => {
+      const weightDiff = b.score.weight - a.score.weight;
+      if (weightDiff !== 0) return weightDiff;
+      const ka = stableCandidateOrderKey(a.record);
+      const kb = stableCandidateOrderKey(b.record);
+      return ka < kb ? -1 : ka > kb ? 1 : 0;
+    })
     .slice(0, cfg.maxSampleCount);
 
   if (finalSample.length === 0) return null;
