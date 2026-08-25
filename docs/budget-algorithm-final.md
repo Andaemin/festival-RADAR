@@ -328,8 +328,10 @@ Phase 26에서 확인된 2017–2024 `venueType`(장소 유형) 정보 부재는
 
 - **Series**: visitor feature를 own-history 추정에 추가해도 개선이 없었다(오히려 소폭 악화된 variant도 있었다) → 미채택.
 - **Peer**: 후보의 historical visitor를 similarity 계산에 직접 넣는 방식(P1/P2)은 효과가 약했다. 다만 **oracle/proxy 실험**(target 자신의 visitor를 알고 있다고 가정하고 선정된 후보 안에서 scale만 별도 보정하는 방식, P3)에서는 유의미한 개선 가능성이 확인됐다.
-- **핵심 제약**: 그 개선 가능성은 **planning-time expected visitor input이 현재 시스템에 없기 때문에** production에 채택하지 못했다 — PEER_FALLBACK 대상은 series 매칭 자체가 안 된 경우라 historical visitor조차 자동으로 확보할 방법이 구조적으로 없다(series 매칭 실패 = visitor 미확보). historical visitor(과거 실제 방문객 수)를 future expected visitor(계획 시점의 예상 방문객 수)와 동일시하지 않는다 — 이 둘은 의미가 다르다.
+- **핵심 제약**: 그 개선 가능성은 **planning-time expected visitor input이 현재 시스템에 없기 때문에** production에 채택하지 못했다 — PEER_FALLBACK 대상은 series 매칭 자체가 안 된 경우라 historical visitor조차 자동으로 확보할 방법이 구조적으로 없다(series 매칭 실패 = visitor 미확보). `visitorTotalPersons`(historical actual visitor record, 과거 실제 방문객 실적)를 `expectedVisitorCount`(future planning-time user input, 계획 시점의 예상 방문객 수 — 현재 production에 없음)와 동일시하지 않는다 — 이 둘은 의미가 다르다.
+- **Upper-bound evidence(오해 방지 표현)**: 같은 eligible cohort(n=1,007/1,190) 기준 baseline(P0) MdAPE 68.2% → target visitor를 안다고 가정한 scale calibration(P3) MdAPE 55.3%라는 실측이 있다. 이를 **"visitor를 적용하면 production MdAPE가 55.3%가 된다"로 쓰지 않는다** — genuine planning-time visitor 정보가 확보된다면 Peer의 scale compression(§26.1)을 크게 줄일 가능성이 있다는 **upper-bound evidence**로만 사용한다. 또한 visitor를 similarity 계산에 섞는 방식(P2, 최선 66.1%)보다 **기존 selection은 그대로 두고 별도 scale calibration만 추가하는 방식(P3, 55.3%)이 더 유망**했다 — 향후 이 입력을 실제로 확보하면 P2가 아니라 P3 방향을 우선 검토한다(§28).
 - 과거 의심됐던 **"2022년 visitor ×1000 systematic DB bug"**는 재감사(Phase 21-A) 결과 **사실이 아닌 것으로 확인**됐다 — raw 매칭 성공 10,198/10,198건 중 배율(×1000/÷1000) 문제는 0건이었고, 원본 unit 변환은 importer가 정상 처리하고 있었다. 별도로 발견된 5건은 "다른 컬럼(최초개최년도 등)의 값이 방문객 컬럼에 잘못 들어간" 고립된(isolated) 이상치이며, 시스템적 단위 버그가 아니다.
+- **historical visitor 극단값**: 분포에는 매우 큰 값(예: 535,558,000)이 존재하나, 위 감사 결과에 따라 시스템적 단위 오류로 단정하지 않는다 — **원본 이상치로 판단되는 극단값**으로만 표현하며, 향후 이 필드를 실사용에 활용할 경우 outlier guard가 필요하다는 참고 사항으로 남긴다.
 
 ## 23. Current authoritative benchmark
 
@@ -375,11 +377,59 @@ fold별(2024/2025/2026) 전부 **HIGH < MEDIUM < LOW** ordering이 예외 없이
 
 자체 이력이 없는 축제는 target의 실제 규모(scale) 정보가 부족한 상태에서 유사 축제만으로 추정한다. 특히 소액 축제의 overprediction, 대형 축제의 underprediction 구조(small-over / large-under)가 아직 남아 있다. Peer의 MdAPE와 tail(P90/P95)은 Series보다 크게 나쁘다(§23).
 
-### 26.2 Duration monotonicity
+**Scale compression 실측 증거**(PEER_FALLBACK subset, leakage-safe n=1,190, actual budget quintile 분해):
+
+| Quintile | median actual | median estimate | MdAPE | 방향 |
+| --- | --- | --- | --- | --- |
+| P0–20 | 30,000,000 | 125,601,680 | 377.9% | overprediction 99.6% |
+| P80–100 | 800,000,000 | 252,555,426 | 71.3% | underprediction 99.2% |
+
+actual budget은 quintile 양 끝에서 약 **26.7배**(30M→800M) 벌어지는데, Peer estimate는 같은 구간에서 약 **2배**(125.6M→252.6M)만 움직인다. 이것이 **regression-to-the-middle(scale compression)**의 핵심 실측 증거다 — Peer는 유사 축제들의 예산 분포 중심으로 계속 수렴하려는 경향이 있고, target이 그 분포의 중심에서 얼마나 떨어져 있는지를 구별할 입력 정보가 없다.
+
+**similarity ≠ scale similarity.** Similarity는 "어떤 축제와 비교할 것인가"를 결정하는 신호이지, target 축제가 그 비교군 안에서 어느 규모인지는 충분히 설명하지 못한다. 실측: averageSimilarity vs 실제 target budget의 Spearman 상관 = **-0.032**(사실상 무관), budget quintile별 median averageSimilarity는 **0.935~0.937**로 quintile 전체에서 거의 동일하다 — actual budget scale은 크게 달라지지만 similarity는 거의 변하지 않았다.
+
+**Peer candidate pool 자체의 scale spread**: 동일 target의 finalSample 내부에서도 adjustedBudget의 P90/P10 비율 median = **16.12배**, P75/P25 비율 median = 4.44배에 달한다. 즉 알고리즘이 "유사하다"고 판단한 후보끼리도 실제 계획예산 규모가 매우 넓게 퍼져 있다 — 현재 similarity feature만으로는 target의 scale을 좁히기 어렵다는 직접적인 근거다.
+
+**최종 root cause**: **PLANNING-TIME SCALE INFORMATION SHORTAGE**. region/festivalType/venueType/durationDays는 "비교군"을 정하는 데는 유용하지만, target 자신의 예산 규모를 알려주는 정보가 아니다(§22, §26.7 참고).
+
+Peer는 "아직 완성되지 않은 알고리즘"이 아니다 — **현재 제공 가능한 planning input 안에서 충분히 검증된 baseline**이지만, target의 규모를 직접 식별할 정보가 부족하기 때문에 **정확도 상한이 존재**한다.
+
+### 26.2 Peer input sensitivity(duration monotonicity 포함)
+
+**Peer recommendation은 입력(region/festivalType/venueType/durationDays)이 조금만 바뀌어도 candidate slate 자체가 바뀌며(membership churn), 그 결과 recommendedBudgetKrw가 예상보다 크게 움직일 수 있다.** 이 현상을 처음 발견한 계기는 duration이었지만, 이후 폭넓은 실측(실제 region/type/venue 조합 기반 base case에 대한 feature별 perturbation 연구) 결과 duration은 4개 feature 중 **가장 약한 축**이었다 — 상위 개념을 **Peer Input Sensitivity**로 두고 아래처럼 정리한다.
+
+| feature | median \|Δrecommendation\|(perturbation 시) |
+| --- | --- |
+| festivalType | 약 55~64% |
+| region | 약 29~38% |
+| venueType | 약 8~14% |
+| duration | 약 7~10% |
+
+즉 duration monotonicity는 중요한 known limitation이지만, **가장 강한 sensitivity 축은 아니다.**
+
+#### Duration monotonicity(최초 발견 사례)
 
 **기간이 증가해도 예상 예산이 항상 증가한다고 보장되지는 않는다.**
 
 Phase 23(deep audit)에서 이 현상의 원인이 duration elasticity(보정 공식) 자체가 아니라, **duration similarity가 candidate ranking/후보 slate 자체를 바꾸는 것**(기간이 조금만 달라져도 top-50 후보 구성이 바뀌는 candidate churn)임이 규명됐다. Phase 24/25에서 duration similarity 제거, 2단계 고정선정+보정 구조, partial weight 조정 등 structural fix를 검토했으나 모두 accuracy/tail trade-off로 미채택됐다(§27 참고) — 현재는 duration similarity weight 0.15를 그대로 유지한다.
+
+#### festivalType sensitivity — 상당 부분 DATA-EXPLAINED
+
+실제 historical population median(VALID budget 기준):
+
+| festivalType | median |
+| --- | --- |
+| TRADITION_HISTORY | 약 300M |
+| CULTURE_ART | 약 280M |
+| LOCAL_SPECIALTY | 약 150M |
+| NATURE_ECOLOGY | 약 110M |
+| COMMUNITY | 약 110M |
+
+최대/최소 비율 약 **2.73배**. 따라서 festivalType 변경에 따른 큰 추천액 변화 중 상당 부분(중앙값 수준의 변화)은 **DATA-EXPLAINED**로 설명된다 — 서로 다른 유형은 실제로 예산 규모 자체가 다른 모집단이다. 다만 실제 population 차이(2.73배)를 크게 넘어서는 극단 tail 변화는 **MODEL-SENSITIVITY**(candidate churn에 의한 증폭)로 구분한다.
+
+#### region sensitivity — SCALE-AMBIGUOUS 성격이 강함
+
+동일 festivalType 안에서도 지역별 실제 budget population 차이는 크지만(예: CULTURE_ART 고정 시 지역 median이 몇 배씩 차이), region 하나가 log-budget 분산을 설명하는 정도(eta-squared)는 약 **0.047**(4.7%)에 불과하다. 즉 특정 지역쌍의 큰 차이는 실재하지만, "이 지역이면 이 정도 규모"라는 일관된 신호로 쓰기엔 약하다 — region sensitivity는 festivalType보다 **SCALE-AMBIGUOUS** 성격이 강하다.
 
 ### 26.3 Historical venue limitation
 
@@ -393,6 +443,37 @@ planning-time expected visitor input을 현재 확보하지 못한다(§22).
 
 P25–P75는 uncertainty interval이 아니다(§16).
 
+### 26.6 Candidate cutoff tie-block
+
+top-N(=50) cutoff 경계에서 정확히 동일한 similarity/weight를 가진 후보 블록이 매우 흔하게 존재한다는 것이 실측으로 확인됐다.
+
+**prevalence**: 전체 leakage-safe target(n=3,432) 중 **82.2%**(cutoff가 실제로 적용되는 대상 대비로는 **92.7%**)에서 rank50과 rank51의 weight가 정확히 동일했다. tie block 크기는 median 52, P75 87, P90 162, max 1,749에 달했고, block 내부 budget dispersion((P75-P25)/median)은 median **153.6%**로 매우 컸다.
+
+**원인**: 이는 **구현 오류가 아니다.** 실측된 tie block의 93.7%에서 typeScore/regionScore/venueAvailable/durationAvailable/fallbackStage 5개 categorical 속성이 전부 동일했다 — venue/duration 결측 시 해당 feature를 similarity 계산에서 제외하고 나머지 가중치로 재정규화하는 현재 방식(§8)과, 넓은 fallback tier(특히 SAME_REGION_TYPE)가 결합되면서 자연스럽게 발생하는 구조적 현상이다.
+
+**tie-break의 성격**: 현재 secondary key(`sourceSha256+sourceSheet+sourceRow`, §11)는 유지한다. 이 tie-break는 **동일 점수 후보의 순서를 결정해 재현성(reproducibility)을 보장하지만, 어떤 동점 후보가 통계 표본에 포함되어야 하는지에 대한 prediction signal은 아니다.** "잘못된 tie-break"가 아니라, 애초에 그런 역할을 하도록 설계되지 않았다는 의미다.
+
+**연구 variant — Fractional Boundary Tie Weighting("Variant B") 판정: INTERESTING / HOLD.**
+
+cutoff에 걸친 tie block 전체를 포함하되, block 전체가 원래 남은 slot 수만큼의 weight만 갖도록 fractional하게 축소하는 research variant를 검증했다.
+
+- 장점: leakage-safe benchmark(n=3,432)에서 accuracy ≈ baseline(오히려 Recommendation MdAPE 소폭 개선), severe underprediction 불변, candidate membership stability 개선(duration/venueType perturbation Jaccard +7~9%p), venueType 금액 sensitivity 일부 개선(median -33%).
+- 한계: duration recommendation의 금액 안정성은 확실한 개선으로 이어지지 않았다(넓은 표본 재검증에서 baseline과 사실상 wash). region/festivalType은 tie block과 무관하게 애초에 다른 population을 재조회하는 문제라 이 variant의 해결 대상이 아니다(membership Jaccard가 baseline부터 0%).
+- **production 미적용.** 유망하지만 결정적이지 않아 HOLD 상태로 유지하며, 이 문서 갱신에서도 selector/weight/tie-break 자체는 바꾸지 않는다.
+
+### 26.7 Series vs Peer 최종 비교
+
+| | Series | Peer |
+| --- | --- | --- |
+| own history | 있음 | 없음 |
+| scale 신호 | own budget history 자체가 scale signal | region/type/venue/duration similarity — "비교군"만 정함 |
+| 중심 추정 | CPI-adjusted own-history median | 비교군 선정 후에도 target scale 식별 정보 부족 |
+| 추천 공식 | estimate × 1.05(고정) | max(estimate, P60) |
+| reliability tier | HIGH / MEDIUM | LOW |
+| 특징적 실패 모드 | 없음(own history가 이미 scale을 담고 있음) | regression-to-the-middle(§26.1) |
+
+Series는 own history 자체가 target의 실제 규모를 담고 있어 별도의 scale 정보가 필요 없다. Peer는 "누구와 비교할 것인가"(region/type/venue/duration)는 잘 풀지만 "그 비교군 안에서 target이 어느 규모인가"를 알려줄 입력이 구조적으로 없다 — 이것이 §26.1의 root cause(PLANNING-TIME SCALE INFORMATION SHORTAGE)와 정확히 같은 문제다.
+
 ## 27. 기각한 주요 실험 요약
 
 | 실험 | 결과 | 최종 결정 |
@@ -404,13 +485,38 @@ P25–P75는 uncertainty interval이 아니다(§16).
 | Duration similarity 완전 제거 | monotonicity는 개선되나 accuracy/tail 악화 | 미사용 |
 | Partial duration weight(0~0.15 사이) | Pareto candidate 없음 | 0.15 유지 |
 | Series visitor feature | 개선 없음 | 미사용 |
-| Peer visitor oracle scale correction | 가능성 있음(계획 방문객 입력 있다는 전제) | future work |
+| Peer visitor oracle scale correction(P3, selection 불변+scale calibration) | 같은 eligible cohort 기준 P0 68.2%→P3 55.3%(§22, §26.1) — genuine planning-time visitor 확보 시 유망. P2(similarity에 visitor 혼합, 최선 66.1%)보다 P3(selection 유지+calibration)이 더 유망 | genuine planning-time 정보 확보 전까지 future work(§28) |
+| Peer N cutoff counterfactual(N=30/40/50/60/75) | leakage-safe benchmark(n=3,432) 전체에서 accuracy/tail/stability 모두 일관된 개선 방향 없음 | N=50 유지 — N cutoff 자체는 핵심 stability lever가 아님 |
+| Peer P60 percentile counterfactual(P50/P55/P60/P65/mean) | percentile을 낮추면 accuracy/tail 일부 개선되지만 severe underprediction 증가, 높이면 반대(tail 악화, conservativeness 증가) — input stability(duration/feature sensitivity, §26.2)는 어느 방향으로도 해결 안 됨 | P60 유지 |
+| Tie-block Variant A(전체 포함) | accuracy 소폭 악화, membership 일부 개선되나 region/festivalType은 오히려 악화 | REJECT |
+| Tie-block Variant B(fractional weighting) | accuracy 무손실, membership 개선, venueType 금액 안정성 개선, duration 금액 안정성은 불확실(§26.6) | INTERESTING / HOLD, production 미적용 |
 
 ## 28. Future work
 
-가장 우선순위가 높은 후속 과제는 **planning-time expected visitor(계획 시점의 예상 방문객 수) 입력**을 실제로 확보하는 것이다. 이 입력이 실제 공개 데이터나 사용자 입력 필드로 확보되면, 기존 Peer selection(§10)은 그대로 유지한 채 target scale correction(§22의 oracle/proxy 실험이 보여준 방식)으로 활용할 가능성을 검토할 수 있다.
+### 현재 알고리즘 연구 최종 상태
 
-현재 production에는 포함되지 않으며, 이 입력이 확보되기 전까지는 자동 scale calibration을 추가로 시도하지 않는다. 알고리즘 weight 재튜닝(유사도 가중치, duration elasticity 등)은 future work의 1순위가 아니다 — §26.2/§27에서 보듯 이미 여러 차례 재검토했고 현재 값을 유지하는 것이 근거 있는 결론이다.
+```
+Series: FINAL
+Peer selector: BASELINE FROZEN
+Variant B: INTERESTING / HOLD
+Peer root limitation: PLANNING-TIME SCALE INFORMATION SHORTAGE
+Next dependency: GENUINE PLANNING-TIME SCALE DATA
+```
+
+**Peer research 상태: RESEARCH CLOSED / BLOCKED BY DATA DEPENDENCY.**
+
+Series는 production-ready baseline으로 확정한다. Peer는 selector/N/percentile/tie processing을 폭넓게 검토했으나(§26.2, §26.6, §27) 근본 병목(§26.1의 PLANNING-TIME SCALE INFORMATION SHORTAGE)을 해결하지 못했다. **genuine planning-time scale information(예: 실사용자가 입력하는 expectedVisitorCount, 또는 이에 준하는 planning-time scale variable)이 확보되기 전까지 다음을 더 진행하지 않는다:**
+
+- Peer selector 추가 튜닝
+- N cutoff 변경
+- P60 percentile 변경
+- duration weight 변경
+- tie processing(§26.6, Variant B 포함) production 적용
+- historical visitor proxy(`visitorTotalPersons`) 기반 신규 production 모델 생성
+
+가장 우선순위가 높은 후속 과제는 **genuine planning-time expected visitor(또는 이에 준하는 scale 변수) 입력**을 실제로 확보하는 것이다. 이 입력이 실제 사용자 입력 필드로 확보되면, 기존 Peer selection(§10)은 그대로 유지한 채 target scale calibration(§22, §26.1의 oracle/proxy 실험이 보여준 P3 방식 — selection에 섞지 않고 별도 calibration layer로 적용)으로 활용할 가능성을 검토할 수 있다.
+
+알고리즘 weight 재튜닝(유사도 가중치, duration elasticity 등)은 future work의 1순위가 아니다 — §26.2/§27에서 보듯 이미 여러 차례 재검토했고 현재 값을 유지하는 것이 근거 있는 결론이다.
 
 ## 29. Reproducibility / tests
 
@@ -444,3 +550,4 @@ hash는 이 문서가 마지막으로 커밋된 시점 기준이며, 이후 hist
 | Recency weighting | 사용 안 함 |
 | Visitor | 현재 사용 안 함(future work) |
 | Candidate ordering | deterministic(source-lineage tie-break) |
+| Peer root limitation | planning-time scale information shortage(§26.1, §28 최종 상태 블록 참고) |
