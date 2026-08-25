@@ -2,11 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { FESTIVAL_TYPE_DISPLAY, FestivalType, REGION_DISPLAY, Region, VenueType } from "@/lib/domain/enums";
 import { enrichByFestivalName, isTourApiEnabled, type TourApiFestivalDetail } from "@/lib/external/tour-api";
 import { isLocalStoryEnabled, searchLocalStories, type LocalStory } from "@/lib/external/local-story";
+import {
+    findFestivalStandardsByNames,
+    isFestivalStandardEnabled,
+    type FestivalStandardRecord,
+} from "@/lib/external/festival-standard";
 import { generatePlanDraft, isLlmEnabled } from "@/lib/llm/plan-draft";
 import { fetchRegionVisitorProfile, isVisitorStatsEnabled, type VisitorProfile } from "@/lib/external/visitor-stats";
 import { generateRecommendations } from "@/lib/planner/recommendation-engine";
+import { loadClimateNormals } from "@/lib/planner/climate-normals";
 import { loadPlannerCorpus } from "@/lib/planner/record-source";
-import { IntegrationStatus, PlanDraftResponse, PlanningRecommendationRequest } from "@/lib/planner/types";
+import {
+    FestivalVenueInfo,
+    IntegrationStatus,
+    PlanDraftResponse,
+    PlanningRecommendationRequest,
+} from "@/lib/planner/types";
 
 /**
  * LLM 기획안 생성 전용 엔드포인트.
@@ -56,7 +67,13 @@ export async function POST(request: NextRequest) {
 
     if (!isLlmEnabled()) {
         const llm: IntegrationStatus = { enabled: false, reason: "OPENAI_API_KEY가 설정되지 않았습니다." };
-        return NextResponse.json({ llmPlan: null, llm, visitorProfile: null, warnings } satisfies PlanDraftResponse);
+        return NextResponse.json({
+            llmPlan: null,
+            llm,
+            visitorProfile: null,
+            festivalVenues: {},
+            warnings,
+        } satisfies PlanDraftResponse);
     }
 
     try {
@@ -65,7 +82,11 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ message: "적재된 축제 데이터가 없습니다." }, { status: 503 });
         }
 
-        const engine = generateRecommendations({ request: body, all: corpus.records });
+        const engine = generateRecommendations({
+            request: body,
+            all: corpus.records,
+            climate: loadClimateNormals(),
+        });
 
         // 외부 재료 수집은 서로 독립적이므로 병렬로 돌린다. 어느 쪽이 실패해도
         // 기획안 생성 자체는 진행한다(재료가 줄어들 뿐이다).
@@ -76,11 +97,25 @@ export async function POST(request: NextRequest) {
             startMonth ?? (timingCard ? Number(timingCard.id.replace("timing-", "")) : new Date().getMonth() + 1);
         const statsYear = new Date().getFullYear() - 1;
 
-        const [tourApiDetails, localStories, visitorProfile] = await Promise.all([
+        const [tourApiDetails, standardsByName, localStories, visitorProfile] = await Promise.all([
             collectTourApiDetails(engine.recommendations, regionCode as Region, planningYear, warnings),
+            collectFestivalStandards(engine.recommendations, warnings),
             collectLocalStories(regionCode as Region, warnings),
             collectVisitorProfile(regionCode as Region, statsYear, statsMonth, warnings),
         ]);
+
+        // 프롬프트에는 카드당 상위 2건만 넣어 길이를 줄이고, 화면 표에는 찾은 것을 모두 보낸다.
+        const promptNames = new Set(
+            engine.recommendations.flatMap((r) => r.referenceFestivals.slice(0, 2).map((f) => f.festivalName))
+        );
+        const festivalStandards = [...standardsByName]
+            .filter(([name]) => promptNames.has(name))
+            .map(([, rec]) => rec);
+
+        const festivalVenues: Record<string, FestivalVenueInfo> = {};
+        for (const [name, rec] of standardsByName) {
+            festivalVenues[name] = { venue: rec.venue, startDate: rec.startDate, endDate: rec.endDate };
+        }
 
         const llmPlan = await generatePlanDraft({
             regionLabel: REGION_DISPLAY[regionCode as Region] ?? regionCode,
@@ -90,6 +125,7 @@ export async function POST(request: NextRequest) {
             saturationMessage: engine.saturation?.message ?? null,
             medianCostPerVisitorKrw: engine.budgetEfficiency.medianCostPerVisitorKrw,
             tourApiDetails,
+            festivalStandards,
             localStories,
             visitorProfile,
         });
@@ -98,6 +134,7 @@ export async function POST(request: NextRequest) {
             llmPlan,
             llm: { enabled: true, reason: null },
             visitorProfile,
+            festivalVenues,
             warnings,
         } satisfies PlanDraftResponse);
     } catch (error) {
@@ -107,6 +144,7 @@ export async function POST(request: NextRequest) {
             llmPlan: null,
             llm: { enabled: false, reason },
             visitorProfile: null,
+            festivalVenues: {},
             warnings,
         } satisfies PlanDraftResponse);
     }
@@ -127,6 +165,25 @@ async function collectTourApiDetails(
     } catch (e) {
         warnings.push(`TourAPI 조회에 실패했습니다: ${e instanceof Error ? e.message : String(e)}`);
         return [];
+    }
+}
+
+/**
+ * 근거 축제의 개최장소·기간·주최기관을 표준데이터에서 찾는다.
+ * 화면 표에도 쓰이므로 카드에 노출되는 **모든** 근거 축제를 대상으로 한다.
+ */
+async function collectFestivalStandards(
+    recommendations: ReturnType<typeof generateRecommendations>["recommendations"],
+    warnings: string[]
+): Promise<Map<string, FestivalStandardRecord>> {
+    if (!isFestivalStandardEnabled()) return new Map();
+
+    const names = recommendations.flatMap((r) => r.referenceFestivals.map((f) => f.festivalName));
+    try {
+        return await findFestivalStandardsByNames([...new Set(names)]);
+    } catch (e) {
+        warnings.push(`전국문화축제표준데이터 조회에 실패했습니다: ${e instanceof Error ? e.message : String(e)}`);
+        return new Map();
     }
 }
 

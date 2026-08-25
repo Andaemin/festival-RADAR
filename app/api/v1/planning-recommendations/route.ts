@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FestivalType, Region, VenueType } from "@/lib/domain/enums";
 import { isTourApiEnabled } from "@/lib/external/tour-api";
+import { isFestivalStandardEnabled } from "@/lib/external/festival-standard";
 import { isLocalStoryEnabled, localStoryProviderName } from "@/lib/external/local-story";
 import { isLlmEnabled } from "@/lib/llm/plan-draft";
 import { generateRecommendations } from "@/lib/planner/recommendation-engine";
+import { loadClimateNormals } from "@/lib/planner/climate-normals";
 import { loadPlannerCorpus } from "@/lib/planner/record-source";
 import {
     IntegrationStatus,
@@ -55,13 +57,22 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const engine = generateRecommendations({ request: body, all: corpus.records });
+        const engine = generateRecommendations({
+            request: body,
+            all: corpus.records,
+            climate: loadClimateNormals(),
+        });
         const warnings = [...engine.warnings];
 
         // ── 외부 데이터 연동 상태 ─────────────────────────────────────────
         // 여기서는 "쓸 수 있는가"만 판정한다. TourAPI 상세 조회는 네트워크 왕복이
         // 필요하고 LLM 프롬프트에만 쓰이므로 plan-draft 라우트로 옮겼다.
         const tourApi: IntegrationStatus = isTourApiEnabled()
+            ? { enabled: true, reason: null }
+            : { enabled: false, reason: "TOUR_API_SERVICE_KEY가 설정되지 않았습니다." };
+
+        // 표준데이터도 프롬프트 재료라 조회는 plan-draft 라우트가 한다.
+        const festivalStandard: IntegrationStatus = isFestivalStandardEnabled()
             ? { enabled: true, reason: null }
             : { enabled: false, reason: "TOUR_API_SERVICE_KEY가 설정되지 않았습니다." };
 
@@ -81,13 +92,14 @@ export async function POST(request: NextRequest) {
         const response: PlanningRecommendationResponse = {
             planningYear,
             datasetYear: corpus.datasetYear,
+            datasetYearRange: corpus.datasetYearRange,
             cohort: engine.cohort,
             recommendations: engine.recommendations,
             saturation: engine.saturation,
             monthDistribution: engine.monthDistribution,
             budgetEfficiency: engine.budgetEfficiency,
             whitespace: engine.whitespace,
-            integrations: { tourApi, localStory, llm },
+            integrations: { tourApi, festivalStandard, localStory, llm },
             warnings,
         };
 

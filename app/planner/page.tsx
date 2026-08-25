@@ -8,7 +8,13 @@ import {
     fetchPlanningRecommendations,
     type PlanningRecommendationResponse,
 } from "@/lib/api/planning-recommendations";
-import type { LlmPlanDraft, Recommendation, ReferenceFestival, VisitorProfile } from "@/lib/planner/types";
+import type {
+    FestivalVenueInfo,
+    LlmPlanDraft,
+    Recommendation,
+    ReferenceFestival,
+    VisitorProfile,
+} from "@/lib/planner/types";
 import MonthChart from "./month-chart";
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -32,7 +38,24 @@ function num(value: number | null, suffix = ""): string {
     return value === null ? "미상" : `${value.toLocaleString("ko-KR")}${suffix}`;
 }
 
-function ReferenceTable({ items }: { items: ReferenceFestival[] }) {
+/** "2026-04-01" + "2026-04-08" -> "2026.04.01~04.08". 해가 넘어가면 종료일도 연도를 붙인다. */
+function period(start: string | null, end: string | null): string | null {
+    if (!start) return null;
+    const dot = (d: string) => d.replaceAll("-", ".");
+    if (!end) return dot(start);
+    return start.slice(0, 4) === end.slice(0, 4)
+        ? `${dot(start)}~${dot(end).slice(5)}`
+        : `${dot(start)}~${dot(end)}`;
+}
+
+function ReferenceTable({
+    items,
+    venues,
+}: {
+    items: ReferenceFestival[];
+    /** 축제명 -> 실제 개최 장소·기간(전국문화축제표준데이터). 기획안과 함께 뒤늦게 도착한다. */
+    venues: Record<string, FestivalVenueInfo>;
+}) {
     if (items.length === 0) return null;
     return (
         <div className="border-t border-gray-200 pt-3 mt-4 overflow-x-auto">
@@ -50,9 +73,22 @@ function ReferenceTable({ items }: { items: ReferenceFestival[] }) {
                     </tr>
                 </thead>
                 <tbody>
-                    {items.map((f, i) => (
+                    {items.map((f, i) => {
+                        const venue = venues[f.festivalName];
+                        const actualPeriod = venue ? period(venue.startDate, venue.endDate) : null;
+                        return (
                         <tr key={`${f.festivalName}-${i}`} className="border-t border-gray-100">
-                            <td className="py-1.5 pr-3">{f.festivalName}</td>
+                            <td className="py-1.5 pr-3">
+                                {f.festivalName}
+                                {/* 표준데이터에서 찾은 실제 개최 정보. 못 찾으면 아무것도 안 나온다 */}
+                                {(venue?.venue || actualPeriod) && (
+                                    <span className="block text-xs text-gray-500 mt-0.5">
+                                        {venue?.venue}
+                                        {venue?.venue && actualPeriod ? " · " : ""}
+                                        {actualPeriod}
+                                    </span>
+                                )}
+                            </td>
                             <td className="py-1.5 pr-3 text-gray-600">
                                 {f.regionLabel}
                                 {f.district ? ` ${f.district}` : ""}
@@ -65,9 +101,15 @@ function ReferenceTable({ items }: { items: ReferenceFestival[] }) {
                             <td className="py-1.5 pr-3 text-right">{num(f.visitors, "명")}</td>
                             <td className="py-1.5 text-right">{krw(f.costPerVisitorKrw)}</td>
                         </tr>
-                    ))}
+                        );
+                    })}
                 </tbody>
             </table>
+            {items.some((f) => venues[f.festivalName]) && (
+                <p className="text-[11px] text-gray-400 mt-2">
+                    회색 줄은 전국문화축제표준데이터의 실제 개최 장소·기간입니다.
+                </p>
+            )}
         </div>
     );
 }
@@ -93,6 +135,7 @@ export default function PlannerPage() {
     // AI 기획안은 통계와 분리해 뒤따라 받는다. 통계는 수십 ms, LLM은 수 초가 걸린다.
     const [llmPlan, setLlmPlan] = useState<LlmPlanDraft | null>(null);
     const [visitorProfile, setVisitorProfile] = useState<VisitorProfile | null>(null);
+    const [festivalVenues, setFestivalVenues] = useState<Record<string, FestivalVenueInfo>>({});
     const [llmLoading, setLlmLoading] = useState(false);
     const [llmError, setLlmError] = useState<string | null>(null);
 
@@ -121,6 +164,7 @@ export default function PlannerPage() {
         setResult(null);
         setLlmPlan(null);
         setVisitorProfile(null);
+        setFestivalVenues({});
         setLlmError(null);
         setLoading(true);
 
@@ -146,6 +190,7 @@ export default function PlannerPage() {
                     .then((draft) => {
                         setLlmPlan(draft.llmPlan);
                         setVisitorProfile(draft.visitorProfile);
+                        setFestivalVenues(draft.festivalVenues ?? {});
                         if (!draft.llmPlan && draft.llm.reason) setLlmError(draft.llm.reason);
                     })
                     .catch((err) => setLlmError(err instanceof Error ? err.message : String(err)))
@@ -330,7 +375,10 @@ export default function PlannerPage() {
                         <section className="bg-white rounded-xl shadow p-6">
                             <h2 className="text-base font-bold mb-1">분석 기준</h2>
                             <p className="text-xs text-gray-500 mb-4">
-                                {result.datasetYear}년 전국 축제 개최계획 데이터 기준
+                                {result.datasetYearRange[0] === result.datasetYearRange[1]
+                                    ? `${result.datasetYear}년`
+                                    : `${result.datasetYearRange[0]}~${result.datasetYearRange[1]}년`}{" "}
+                                전국 축제 개최계획 데이터 기준
                             </p>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                                 {[
@@ -417,7 +465,7 @@ export default function PlannerPage() {
                                         </ul>
                                     )}
 
-                                    <ReferenceTable items={rec.referenceFestivals} />
+                                    <ReferenceTable items={rec.referenceFestivals} venues={festivalVenues} />
                                 </article>
                             ))}
                         </section>
@@ -585,6 +633,10 @@ export default function PlannerPage() {
                                 {(
                                     [
                                         ["TourAPI 4.0 (축제 상세 프로그램)", result.integrations.tourApi],
+                                        [
+                                            "전국문화축제표준데이터 (개최장소·기간·주최)",
+                                            result.integrations.festivalStandard,
+                                        ],
                                         ["지역 스토리 (설화·향토자산)", result.integrations.localStory],
                                         ["AI 기획안 생성", result.integrations.llm],
                                     ] as const

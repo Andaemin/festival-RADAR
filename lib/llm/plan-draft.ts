@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { LlmPlanDraft, Recommendation } from "@/lib/planner/types";
 import type { TourApiFestivalDetail } from "@/lib/external/tour-api";
 import type { LocalStory } from "@/lib/external/local-story";
+import type { FestivalStandardRecord } from "@/lib/external/festival-standard";
 import type { VisitorProfile } from "@/lib/external/visitor-stats";
 
 /**
@@ -42,6 +43,12 @@ export interface PlanDraftInput {
     saturationMessage: string | null;
     medianCostPerVisitorKrw: number | null;
     tourApiDetails: TourApiFestivalDetail[];
+    /**
+     * 참고 축제의 개최장소·기간·주최기관(전국문화축제표준데이터).
+     * `content`는 대부분 프로그램 나열이라 소재 서술로 기대하지 말 것
+     * (lib/external/festival-standard.ts 주석 참고).
+     */
+    festivalStandards: FestivalStandardRecord[];
     localStories: LocalStory[];
     visitorProfile: VisitorProfile | null;
 }
@@ -99,6 +106,20 @@ function buildUserPrompt(input: PlanDraftInput): string {
             if (d.program) lines.push(`프로그램: ${d.program.slice(0, 500)}`);
             lines.push("");
         }
+    }
+
+    if (input.festivalStandards.length > 0) {
+        lines.push(`## 참고 축제의 개최 실태 (전국문화축제표준데이터 - 지자체 등록 원장)`);
+        for (const f of input.festivalStandards) {
+            const period = f.startDate ? `${f.startDate}~${f.endDate ?? "?"}` : "기간 미상";
+            lines.push(
+                `- ${f.festivalName} | 장소: ${f.venue ?? "미상"} | ${period}` +
+                    `${f.hostOrganization ? ` | 주최: ${f.hostOrganization}` : ""}` +
+                    `${f.content ? `
+  프로그램: ${f.content.slice(0, 200)}` : ""}`
+            );
+        }
+        lines.push("");
     }
 
     if (input.visitorProfile) {

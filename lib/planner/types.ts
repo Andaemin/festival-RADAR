@@ -132,6 +132,12 @@ export interface LlmPlanDraft {
 export interface PlanningRecommendationResponse {
     planningYear: number;
     datasetYear: number;
+    /**
+     * 코퍼스가 실제로 포괄하는 연도 범위 [최소, 최대].
+     * 코퍼스가 2017~2026 다년도로 바뀐 뒤, 화면이 "2026년 기준"이라고만 말하면
+     * 사실과 다르다. 표시 문구가 이 값을 쓴다.
+     */
+    datasetYearRange: [number, number];
     cohort: CohortSummary;
     recommendations: Recommendation[];
     saturation: SaturationWarning | null;
@@ -141,6 +147,8 @@ export interface PlanningRecommendationResponse {
     /** 외부 데이터/LLM 연동 상태. UI가 "왜 이 섹션이 비었는지" 설명하는 데 쓴다. */
     integrations: {
         tourApi: IntegrationStatus;
+        /** 전국문화축제표준데이터(지자체 등록 원장). 개최장소·기간·주최기관을 준다. */
+        festivalStandard: IntegrationStatus;
         localStory: IntegrationStatus;
         /** LLM 기획안을 이어서 요청할 수 있는지. 실제 생성은 별도 엔드포인트가 담당한다. */
         llm: IntegrationStatus;
@@ -162,7 +170,20 @@ export interface PlanDraftResponse {
      * 외부 API 호출이 필요해 통계 응답이 아닌 이쪽에 함께 실어 보낸다.
      */
     visitorProfile: VisitorProfile | null;
+    /**
+     * 참고 축제의 실제 개최 정보(전국문화축제표준데이터). 축제명 -> 정보.
+     * 통계 응답은 22ms인데 이 조회는 외부 API가 필요해, 기획안과 함께 뒤따라 보낸다.
+     */
+    festivalVenues: Record<string, FestivalVenueInfo>;
     warnings: string[];
+}
+
+/** 근거 축제 표에 덧붙이는 실제 개최 장소·기간. DB에는 없고 표준데이터에서 온다. */
+export interface FestivalVenueInfo {
+    venue: string | null;
+    /** YYYY-MM-DD */
+    startDate: string | null;
+    endDate: string | null;
 }
 
 export interface IntegrationStatus {
