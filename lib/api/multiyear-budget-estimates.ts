@@ -2,6 +2,7 @@ import { MultiYearBudgetEstimateRequest } from "@/lib/multiyear/planning-api-typ
 import type { EstimateBasis, RecommendationBasis, RangeBasis, DataQualityBasis } from "@/lib/multiyear-series/apply-planning-semantics";
 import type { PlanningReliabilityTier } from "@/lib/multiyear-series/reliability";
 import type { SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
+import type { SeriesSearchResult } from "@/lib/multiyear-series/series-search";
 
 export interface MultiYearYearWeightShareDto {
     year: number;
@@ -87,4 +88,26 @@ export async function estimateMultiYearBudget(body: MultiYearBudgetEstimateReque
     }
 
     return data;
+}
+
+/**
+ * PHASE 2 — 기존 축제(Series) 검색 read-only API 클라이언트. 결과를 estimate 요청 DTO에
+ * 되돌려 보낼 때도 `SeriesSearchResult.canonicalName`/`autoFill.regionCode`/`autoFill.district`처럼
+ * 기존 `MultiYearBudgetEstimateRequest` 필드와 1:1 대응되는 값만 쓴다 - groupId 같은 내부
+ * 식별자는 애초에 이 응답에 없다(series-search.ts 참고).
+ */
+export async function searchMultiYearSeries(params: { q: string; planningYear: number; limit?: number }): Promise<SeriesSearchResult[]> {
+    const url = new URL("/api/v1/multiyear-series-search", window.location.origin);
+    url.searchParams.set("q", params.q);
+    url.searchParams.set("planningYear", String(params.planningYear));
+    if (params.limit !== undefined) url.searchParams.set("limit", String(params.limit));
+
+    const res = await fetch(url.pathname + url.search);
+    const data = await res.json();
+
+    if (!res.ok) {
+        throw new Error(data.message ?? "축제 검색에 실패했습니다.");
+    }
+
+    return data.results;
 }
