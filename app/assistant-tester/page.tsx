@@ -15,43 +15,57 @@ import { buildSeriesSearchResultKey, type SeriesSearchResult } from "@/lib/multi
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_MIN_LENGTH = 2;
 
-/** Duration sensitivity 한 행의 상태 — 성공/실패를 개별 보존한다(13절, 한 duration 실패가 전체를
- *  지우지 않음). */
-type SensitivityRow =
-    | { durationDays: number; isCurrent: boolean; status: "loading" }
-    | { durationDays: number; isCurrent: boolean; status: "success"; data: MultiYearBudgetEstimateResponse }
-    | { durationDays: number; isCurrent: boolean; status: "error"; error: string };
+/** PHASE 6 — "과년도에 개최했던 축제"(EXISTING) vs "신규 축제"(NEW)를 먼저 명시적으로 고르게
+ *  한다. 검색어는 festivalName을 자동 확정하지 않는다 - EXISTING mode의 festivalName은 오직
+ *  selectedSeries.canonicalName으로만 결정된다. */
+export type FestivalMode = "EXISTING" | "NEW";
 
-/**
- * PHASE 5 — page.tsx 안의 순수 폼 로직만 따로 뽑아 export한다(컴포넌트 상태와 분리해 unit test
- * 가능하게 하기 위함, 17절). 실제 컴포넌트도 아래 세 함수를 그대로 호출한다 - 여기서 검증한
- * 동작과 화면에서 실제로 일어나는 동작이 어긋날 수 없다.
- */
-
-/** 1절 — festivalName을 직접 수정한 값이 현재 선택된 series의 canonicalName과 달라지면
- *  stale metadata를 초기화해야 한다는 순수 판정. */
+/** PHASE 6 — 검색어(seriesSearchText)를 직접 수정한 값이 현재 선택된 series의 canonicalName과
+ *  달라지면 stale metadata를 초기화해야 한다는 순수 판정. */
 export function shouldResetMetadataOnNameEdit(newValue: string, selectedSeries: SeriesSearchResult | null): boolean {
     return selectedSeries !== null && newValue !== selectedSeries.canonicalName;
 }
 
-/** 8절 — durationDays validation: 비어있지 않고, finite number이고, 0보다 커야 한다. */
+/** PHASE 6 — durationDays validation: 비어있지 않고, finite number이고, 0보다 커야 한다. */
 export function isDurationValid(durationDays: number | ""): boolean {
     return durationDays !== "" && Number.isFinite(durationDays) && durationDays > 0;
 }
 
-/** 9절 — 계산 버튼 비활성 사유를 "라벨 목록"으로 계산한다(순서 고정: 지역 → 유형 → 장소 → 기간). */
+/**
+ * PHASE 6 — 계산 버튼 비활성 사유를 "라벨 목록"으로 계산한다(순서 고정: 기존 축제 선택 → 지역 →
+ * 유형 → 장소 → 기간). EXISTING mode에서는 selectedSeries가 실제로 있어야 한다 - 검색어만
+ * 입력되고 목록에서 아무것도 선택하지 않은 상태(ambiguous free-text)는 submit 불가 대상이다.
+ */
 export function computeMissingRequiredFields(fields: {
+    festivalMode: FestivalMode;
+    selectedSeries: SeriesSearchResult | null;
     regionCode: string;
     festivalTypes: string[];
     venueType: string;
     durationDays: number | "";
 }): string[] {
     const missing: string[] = [];
+    if (fields.festivalMode === "EXISTING" && fields.selectedSeries === null) missing.push("기존 축제 선택");
     if (!fields.regionCode) missing.push("광역자치단체");
     if (fields.festivalTypes.length === 0) missing.push("축제 유형");
     if (!fields.venueType) missing.push("장소 유형");
     if (!isDurationValid(fields.durationDays)) missing.push("개최일수");
     return missing;
+}
+
+/** PHASE 6 — STABLE/MIXED/MISSING 내부 문자열을 화면에 직접 노출하지 않기 위한 사용자 문구
+ *  변환. STABLE은 값 자체가 있으므로 별도 힌트가 필요 없다(null 반환). */
+export function seriesFieldHint(status: "STABLE" | "MIXED" | "MISSING"): string | null {
+    if (status === "MIXED") return "과거 개최 정보가 연도별로 달라 직접 선택해주세요.";
+    if (status === "MISSING") return "과거 데이터에 해당 정보가 없습니다.";
+    return null;
+}
+
+/** PHASE 6 — planningYear가 바뀔 때 이미 선택된 series가 있었다면(leakage-safe pool 자체가
+ *  달라지므로) 그 선택에서 나온 festivalName/자동입력 metadata까지 함께 지워야 한다는 순수
+ *  판정. 선택이 없었다면(자유입력 중이었다면) 아무것도 지우지 않는다. */
+export function shouldClearSeriesMetadataOnPlanningYearChange(selectedSeries: SeriesSearchResult | null): boolean {
+    return selectedSeries !== null;
 }
 
 /**
@@ -71,49 +85,46 @@ export default function AssistantTesterPage() {
     const [metadata, setMetadata] = useState<MetadataResponse | null>(null);
     const [metaError, setMetaError] = useState<string | null>(null);
 
+    // PHASE 6 — "과년도에 개최했던 축제" vs "신규 축제"를 먼저 명시적으로 고른다. EXISTING을
+    // 기본값으로 둔다 - 이 tester의 핵심 기능(과거 데이터 검색)을 먼저 마주치게 하되, 상단에 항상
+    // 현재 모드가 표시되므로 어느 쪽이든 사용자가 헷갈리지 않는다.
+    const [festivalMode, setFestivalMode] = useState<FestivalMode>("EXISTING");
+    // PHASE 6 — 검색어(seriesSearchText)와 확정된 festivalName을 논리적으로 분리한다. EXISTING
+    // mode의 festivalName은 오직 selectedSeries.canonicalName으로만 정해진다 - 검색창에 입력
+    // 중인 문자열 자체가 곧바로 request의 festivalName이 되지 않는다.
+    const [seriesSearchText, setSeriesSearchText] = useState("");
+
     // 다년도 계획예산 폼 상태
     const [festivalName, setFestivalName] = useState("");
     const [regionCode, setRegionCode] = useState("");
     const [district, setDistrict] = useState("");
     const [festivalTypes, setFestivalTypes] = useState<string[]>([]);
     const [venueType, setVenueType] = useState("");
-    // PHASE 5·7절 — 기본값을 3에서 빈 문자열로 바꿨다. Series는 durationDays를 자동입력하지 않고
+    // PHASE 6 — 기본값을 3에서 빈 문자열로 바꿨다. Series는 durationDays를 자동입력하지 않고
     // Peer는 사용자의 계획값을 실제로 계산에 쓰므로, "이미 그럴듯한 숫자가 채워져 있어 무심코
-    // 그대로 제출"하는 위험(Phase 4 UX Audit P1)을 없애기 위해 처음부터 빈 상태로 시작한다.
+    // 그대로 제출"하는 위험을 없애기 위해 처음부터 빈 상태로 시작한다.
     const [durationDays, setDurationDays] = useState<number | "">("");
     const [planningYear, setPlanningYear] = useState(2027);
 
     const [result, setResult] = useState<MultiYearBudgetEstimateResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
-    /** 현재 표시 중인 result를 만들어낸 실제 요청 파라미터의 스냅샷. Duration sensitivity는 이
-     *  스냅샷을 기준으로 durationDays만 바꿔 재요청한다 - 폼을 계산 후에 건드려도(재제출 전)
-     *  sensitivity가 화면에 보이는 result와 다른 조건으로 나가지 않게 하기 위함이다("동일 축제
-     *  조건에서"라는 요구사항을 라이브 폼 상태가 아니라 결과 자체에 묶어 보장한다). */
-    const [submittedParams, setSubmittedParams] = useState<{
-        regionCode: string;
-        district: string;
-        festivalTypes: string[];
-        venueType: string;
-        planningYear: number;
-        festivalName: string;
-    } | null>(null);
+    // PHASE 7 — Top peer candidates 표의 "N일 기준 조정 예산" 헤더에 실제 요청에 쓰인 목표
+    // 개최일수를 그대로 보여주기 위한 스냅샷(라이브 폼 durationDays가 결과 표시 이후 바뀌어도
+    // 이미 계산된 결과의 헤더 문구가 같이 흔들리지 않게 한다).
+    const [submittedDurationDays, setSubmittedDurationDays] = useState<number | null>(null);
 
-    // Duration sensitivity — 기존 result/loading/error와 완전히 분리된 별도 state(13절).
-    const [sensitivityRows, setSensitivityRows] = useState<SensitivityRow[] | null>(null);
-    const [sensitivityLoading, setSensitivityLoading] = useState(false);
-
-    // PHASE 2 — 기존 축제 검색(FestivalSeries autocomplete) 상태. selectedSeries는 UI 표시
+    // PHASE 6 — 기존 축제 검색(FestivalSeries autocomplete) 상태. selectedSeries는 UI 표시
     // 전용이며(어떤 series를 기반으로 자동입력됐는지), estimate 요청에는 절대 실리지 않는다
-    // (groupId round-trip 금지 - 3절). festivalName/regionCode/district/festivalTypes/venueType은
+    // (groupId round-trip 금지). festivalName/regionCode/district/festivalTypes/venueType은
     // 기존 form state를 그대로 재사용해 자동기입한다 - 별도 "series 전용" 필드를 만들지 않는다.
     const [seriesSearchResults, setSeriesSearchResults] = useState<SeriesSearchResult[]>([]);
     const [seriesSearchLoading, setSeriesSearchLoading] = useState(false);
     const [seriesSearchOpen, setSeriesSearchOpen] = useState(false);
     const [selectedSeries, setSelectedSeries] = useState<SeriesSearchResult | null>(null);
-    // PHASE 5·1절 — festivalName을 직접 수정해 선택돼 있던 series의 metadata를 초기화했을 때만
-    // true. "즉시 안내"가 목적이라 별도 toast 없이 이 boolean 하나로 인라인 문구를 켠다 - 새 series
-    // 선택/제출/연도 변경처럼 문맥이 바뀌면 각 핸들러에서 다시 false로 되돌린다.
+    // PHASE 6 — festivalName을 직접 수정해 선택돼 있던 series의 metadata를 초기화했을 때만
+    // true. "즉시 안내"가 목적이라 별도 toast 없이 이 boolean 하나로 인라인 문구를 켠다 - 새
+    // series 선택/제출/연도 변경처럼 문맥이 바뀌면 각 핸들러에서 다시 false로 되돌린다.
     const [metadataResetNotice, setMetadataResetNotice] = useState(false);
 
     useEffect(() => {
@@ -132,11 +143,10 @@ export default function AssistantTesterPage() {
             .catch((e) => setMetaError(String(e)));
     }, []);
 
-    // PHASE 2·13절 — metadata의 district 옵션(legacy 기반이었으나 현재는 다년도 기반으로 개선됨,
-    // 그래도 완전히 같은 목록이라는 보장은 없다)과 현재 선택된 series가 제공한 안정 district를
-    // union한다. Series의 district가 지금 선택된 regionCode와 다른 series의 것이면(예: 사용자가
-    // series 선택 후 region을 직접 다른 값으로 바꾼 경우) 섞지 않는다 - 엉뚱한 지역의 구가
-    // 목록에 끼어들지 않도록.
+    // PHASE 6 — metadata의 district 옵션과 현재 선택된 series가 제공한 안정 district를 union한다.
+    // Series의 district가 지금 선택된 regionCode와 다른 series의 것이면(예: 사용자가 series 선택
+    // 후 region을 직접 다른 값으로 바꾼 경우) 섞지 않는다 - 엉뚱한 지역의 구가 목록에 끼어들지
+    // 않도록.
     const metadataDistricts = metadata?.districtsByRegion[regionCode] ?? [];
     const seriesDistrictToUnion =
         selectedSeries && selectedSeries.fieldStatus.district === "STABLE" && selectedSeries.autoFill.regionCode === regionCode
@@ -152,22 +162,19 @@ export default function AssistantTesterPage() {
     }
 
     /**
-     * PHASE 5·1절(Phase 4 UX Audit P0 수정) — autocomplete로 선택된 series가 있는 상태에서
-     * festivalName 텍스트를 직접 수정해 그 canonicalName과 달라지면, selectedSeries 표시만
-     * 해제하는 게 아니라 **region/district/festivalTypes/venueType까지 전부 초기화**한다.
-     * "부산국제록페스티벌 선택 → 이름만 다른 축제로 수정 → BUSAN/CULTURE_ART/GREEN이 그대로
-     * 남아 무관한 축제 metadata로 제출 가능"했던 실제 wrong-request 위험을 없앤다 - 이 tester는
-     * convenience보다 correctness를 우선한다(stale metadata를 절대 남기지 않음).
-     * durationDays/planningYear는 건드리지 않는다(8절/12절과 동일한 원칙 - 사용자가 입력한
-     * 기간·연도는 festivalName 편집과 무관하게 보존).
+     * PHASE 6 — EXISTING mode 검색창(seriesSearchText) 전용 change handler. 검색어 자체는
+     * festivalName이 아니다 - 결과를 클릭해야만(handleSelectSeries) festivalName이 확정된다
+     * (ambiguous free-text path 제거). 이미 선택된 series가 있는 상태에서 검색어를 다시 고치면
+     * (다른 축제를 찾는 중이라는 뜻) 이전 선택과 그 자동입력 metadata를 즉시 초기화한다.
      * 2자 미만으로 줄어들면 검색 결과/드롭다운도 이 이벤트 핸들러에서 즉시 정리한다(아래 검색
-     * effect는 실제 네트워크 요청·debounce timer만 담당하고, 이 즉시 반응형 정리는 이벤트
-     * 핸들러가 맡는다 - effect 본문에서 동기 setState를 피하기 위함).
+     * effect는 실제 네트워크 요청·debounce timer만 담당 - effect 본문에서 동기 setState를
+     * 피하기 위함).
      */
-    function handleFestivalNameChange(value: string) {
-        setFestivalName(value);
+    function handleSeriesSearchTextChange(value: string) {
+        setSeriesSearchText(value);
         if (shouldResetMetadataOnNameEdit(value, selectedSeries)) {
             setSelectedSeries(null);
+            setFestivalName("");
             setRegionCode("");
             setDistrict("");
             setFestivalTypes([]);
@@ -184,12 +191,44 @@ export default function AssistantTesterPage() {
         }
     }
 
-    /** 14절 — 2자 이상 입력 시에만, 약 250ms debounce로 검색한다. 이미 선택된 series의 이름과
-     *  festivalName이 정확히 같으면(=방금 선택 직후) 재검색하지 않는다 - 선택하자마자 같은
-     *  이름으로 dropdown이 다시 열리는 것을 막기 위함이다. setState는 전부 debounce timer
-     *  콜백/그 안의 promise 콜백에서만 호출한다(effect 본문에서 동기 setState 없음). */
+    /** PHASE 6 — NEW mode의 festivalName은 완전한 자유입력(선택 사항)이다. EXISTING mode 전용
+     *  상태(seriesSearchText/selectedSeries)와 전혀 얽히지 않는다 - mode 전환 시 이미 전부
+     *  비워져 있다(handleFestivalModeChange). */
+    function handleNewFestivalNameChange(value: string) {
+        setFestivalName(value);
+    }
+
+    /**
+     * PHASE 6 — 축제 구분(EXISTING/NEW) 전환. 어느 방향으로 전환하든 이전 mode의 잔여 상태
+     * (검색어/선택된 series/자동입력된 metadata/확정 festivalName)를 전부 초기화한다 -
+     * "신규 → 기존 전환 시 신규 free-text festivalName을 Series festivalName으로 오인"하는
+     * 문제와 "기존 축제 mode에서 자동입력됐던 metadata가 신규 mode로 넘어가 남는" 문제를 동시에
+     * 막는다. planningYear/durationDays는 유지한다(사용자가 이미 입력한 계획 정보는 축제
+     * 구분과 무관).
+     */
+    function handleFestivalModeChange(mode: FestivalMode) {
+        setFestivalMode(mode);
+        setSeriesSearchText("");
+        setSelectedSeries(null);
+        setSeriesSearchResults([]);
+        setSeriesSearchOpen(false);
+        setMetadataResetNotice(false);
+        setFestivalName("");
+        setRegionCode("");
+        setDistrict("");
+        setFestivalTypes([]);
+        setVenueType("");
+    }
+
+    /** PHASE 6 — 2자 이상 입력 시에만, 약 250ms debounce로 검색한다(EXISTING mode에서만 - NEW
+     *  mode에서는 seriesSearchText가 항상 빈 값이라 사실상 no-op이지만 mode 조건도 명시적으로
+     *  건다). 이미 선택된 series의 이름과 검색어가 정확히 같으면(=방금 선택 직후) 재검색하지
+     *  않는다 - 선택하자마자 같은 이름으로 dropdown이 다시 열리는 것을 막기 위함이다. setState는
+     *  전부 debounce timer 콜백/그 안의 promise 콜백에서만 호출한다(effect 본문에서 동기
+     *  setState 없음). */
     useEffect(() => {
-        const trimmed = festivalName.trim();
+        if (festivalMode !== "EXISTING") return;
+        const trimmed = seriesSearchText.trim();
         if (trimmed.length < SEARCH_MIN_LENGTH) return;
         if (selectedSeries && trimmed === selectedSeries.canonicalName) return;
 
@@ -204,8 +243,7 @@ export default function AssistantTesterPage() {
                 })
                 .catch(() => {
                     if (cancelled) return;
-                    // 16절 — 검색 실패가 자유입력 경로를 막으면 안 된다. 조용히 결과 없음으로
-                    // 처리하고 폼 입력은 그대로 둔다.
+                    // 검색 실패가 목록 자체를 못 보여줄 뿐 다른 상태를 건드리지 않는다.
                     setSeriesSearchResults([]);
                     setSeriesSearchOpen(true);
                 })
@@ -218,16 +256,25 @@ export default function AssistantTesterPage() {
             cancelled = true;
             clearTimeout(timer);
         };
-    }, [festivalName, planningYear, selectedSeries]);
+    }, [seriesSearchText, planningYear, selectedSeries, festivalMode]);
 
-    /** 18절 — planningYear가 바뀌면 leakage-safe training pool 자체가 달라지므로, 이전
-     *  planningYear 기준으로 선택/검색된 series 상태를 초기화해야 한다. useEffect 대신 planningYear
-     *  input의 onChange 이벤트 핸들러에서 직접 처리한다(사용자 행동에 직접 반응하는 리셋이라
-     *  effect보다 이벤트 핸들러가 더 적합하고, effect 본문 동기 setState도 피할 수 있다).
-     *  festivalName 텍스트 자체는 지우지 않는다 - 위 검색 effect가 새 planningYear 기준으로
-     *  곧 다시 검색한다. */
+    /**
+     * PHASE 6 — planningYear가 바뀌면 leakage-safe search pool 자체가 달라지므로, 이미 선택된
+     * series를 재검증 없이 그대로 두지 않는다(선택 해제 후 재선택 요구). 선택이 있었다면 그
+     * 선택에서 나온 festivalName/자동입력 metadata까지 함께 지운다 - 그렇지 않으면 "연결이
+     * 끊긴 선택"의 자동입력 값만 남는 stale metadata 문제가 재발한다. NEW mode이거나 애초에
+     * 선택이 없었다면(자유입력 중이었다면) planningYear 변경만으로 사용자가 입력해 둔 값을
+     * 지우지 않는다.
+     */
     function handlePlanningYearChange(value: number) {
         setPlanningYear(value);
+        if (shouldClearSeriesMetadataOnPlanningYearChange(selectedSeries)) {
+            setFestivalName("");
+            setRegionCode("");
+            setDistrict("");
+            setFestivalTypes([]);
+            setVenueType("");
+        }
         setSelectedSeries(null);
         setSeriesSearchResults([]);
         setSeriesSearchOpen(false);
@@ -235,17 +282,19 @@ export default function AssistantTesterPage() {
     }
 
     /**
-     * 15절 — autocomplete 결과 선택. festivalName은 canonicalName으로 고정하고, STABLE 필드만
-     * 자동기입한다(10절 정책). MIXED/MISSING 필드는 "값을 추측해 넣지 않는다"는 원칙에 따라
-     * 전부 빈 값("" / [])으로 초기화한다 — region/venueType도 metadata 첫 옵션을 대신 넣지
-     * 않는다(임의의 첫 값이 사용자가 실제로 선택한 값처럼 제출될 위험이 있기 때문). 빈 값은
-     * "직접 선택" placeholder(아래 select) 상태이며, 실제 metadata enum 값으로 취급하지 않는다 -
-     * submit도 이 빈 값이 남아 있으면 막는다(아래 canSubmit 참고).
-     * durationDays/planningYear는 절대 건드리지 않는다(8절/12절 - Series 최종 예산 산식이
-     * durationDays를 쓰지 않는다는 사실과, 사용자가 입력한 기간을 보존해야 한다는 요구사항은
-     * 서로 다른 층위이며 이 함수는 후자만 담당한다).
+     * PHASE 6 — autocomplete 결과 선택. festivalName은 canonicalName으로 고정하고, STABLE 필드만
+     * 자동기입한다. MIXED/MISSING 필드는 "값을 추측해 넣지 않는다"는 원칙에 따라 전부 빈 값
+     * ("" / [])으로 초기화한다 — region/venueType도 metadata 첫 옵션을 대신 넣지 않는다(임의의
+     * 첫 값이 사용자가 실제로 선택한 값처럼 제출될 위험이 있기 때문). 빈 값은 "직접 선택"
+     * placeholder(아래 select) 상태이며, 실제 metadata enum 값으로 취급하지 않는다 - submit도
+     * 이 빈 값이 남아 있으면 막는다(아래 canSubmit 참고). seriesSearchText도 canonicalName으로
+     * 맞춰 검색창과 확정값이 항상 같은 문자열을 보여주게 한다.
+     * durationDays/planningYear는 절대 건드리지 않는다(Series 최종 예산 산식이 durationDays를
+     * 쓰지 않는다는 사실과, 사용자가 입력한 기간을 보존해야 한다는 요구사항은 서로 다른 층위이며
+     * 이 함수는 후자만 담당한다).
      */
     function handleSelectSeries(result: SeriesSearchResult) {
+        setSeriesSearchText(result.canonicalName);
         setFestivalName(result.canonicalName);
         setSelectedSeries(result);
         setSeriesSearchOpen(false);
@@ -260,16 +309,13 @@ export default function AssistantTesterPage() {
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
-        // 8절 — 버튼 disabled로 이미 막지만, Enter 키 제출 등 예외 경로까지 대비한 방어적
-        // 재확인(canSubmit과 동일 조건). durationDays=""였다면 Number("")=0이 그대로 request에
-        // 실릴 수 있었던 문제(8절)를 여기서도 완전히 막는다.
+        // 버튼 disabled로 이미 막지만, Enter 키 제출 등 예외 경로까지 대비한 방어적 재확인
+        // (canSubmit과 동일 조건). durationDays=""였다면 Number("")=0이 그대로 request에 실릴 수
+        // 있었던 문제를 여기서도 완전히 막는다.
         if (!canSubmit) return;
         setError(null);
         setResult(null);
         setMetadataResetNotice(false);
-        // 새 계산을 시작하면 이전 결과에 딸려 있던 duration sensitivity도 함께 초기화한다 - 다른
-        // 조건의 결과에 이전 sensitivity가 남아있으면 안 된다.
-        setSensitivityRows(null);
         setLoading(true);
         try {
             const data = await estimateMultiYearBudget({
@@ -285,57 +331,12 @@ export default function AssistantTesterPage() {
                 festivalName: festivalName.trim() || undefined,
             });
             setResult(data);
-            setSubmittedParams({ regionCode, district, festivalTypes, venueType, planningYear: Number(planningYear), festivalName });
+            setSubmittedDurationDays(Number(durationDays));
         } catch (e) {
             setError(e instanceof Error ? e.message : "다년도 계획예산 추정에 실패했습니다.");
         } finally {
             setLoading(false);
         }
-    }
-
-    /**
-     * Duration sensitivity(1~13절) — 별도 계산 로직을 만들지 않는다(4절). 현재 result를 만든
-     * `submittedParams`를 그대로 고정하고 durationDays만 바꿔 동일한 production 함수
-     * (`estimateMultiYearBudget` → `/api/v1/multiyear-budget-estimates`)를 그대로 재호출한다.
-     * 자동 실행하지 않는다(2절) - 이 함수는 버튼 클릭으로만 호출된다.
-     */
-    async function runDurationSensitivity() {
-        if (!submittedParams) return;
-        const currentDuration = Number(durationDays);
-        // 3절 — preset(3/7/15/30) ∪ 현재 입력 duration, 중복 제거 후 오름차순. 기존 duration input
-        // 정책(2~180)을 그대로 재사용해 범위 밖 값은 추가하지 않는다.
-        const allDurations = Array.from(new Set([3, 7, 15, 30, currentDuration]))
-            .filter((d) => d >= 2 && d <= 180)
-            .sort((a, b) => a - b);
-
-        setSensitivityLoading(true);
-        setSensitivityRows(allDurations.map((d) => ({ durationDays: d, isCurrent: d === currentDuration, status: "loading" })));
-
-        // Promise.allSettled — 한 duration 호출이 실패해도 나머지 결과를 보존한다(13절).
-        const settled = await Promise.allSettled(
-            allDurations.map((d) =>
-                estimateMultiYearBudget({
-                    regionCode: submittedParams.regionCode,
-                    district: submittedParams.district || undefined,
-                    festivalTypes: submittedParams.festivalTypes,
-                    venueType: submittedParams.venueType,
-                    durationDays: d,
-                    planningYear: submittedParams.planningYear,
-                    referenceDataPolicy: "HISTORICAL_ONLY",
-                    festivalName: submittedParams.festivalName.trim() || undefined,
-                })
-            )
-        );
-        setSensitivityRows(
-            allDurations.map((d, i) => {
-                const s = settled[i];
-                const isCurrent = d === currentDuration;
-                return s.status === "fulfilled"
-                    ? { durationDays: d, isCurrent, status: "success", data: s.value }
-                    : { durationDays: d, isCurrent, status: "error", error: s.reason instanceof Error ? s.reason.message : "요청 실패" };
-            })
-        );
-        setSensitivityLoading(false);
     }
 
     const regionName = metadata?.regions.find((r) => r.code === regionCode)?.displayName ?? regionCode;
@@ -344,17 +345,30 @@ export default function AssistantTesterPage() {
         .join(", ");
     const venueName = metadata?.venueTypes.find((v) => v.code === venueType)?.displayName ?? venueType;
 
-    // Series autofill이 region/venueType을 MIXED/MISSING으로 판정하면 ""(직접 선택 placeholder)로
-    // 남는다 - 이 값은 실제 metadata enum이 아니므로 submit 전에 반드시 채워야 한다(estimate API
-    // contract 자체는 바꾸지 않고, 호출 전에 form validation으로만 막는다). durationDays=""도
-    // 8절에 따라 같은 목록에 포함한다(Number("")===0이 그대로 request에 실리는 것을 막음).
-    const missingRequiredFields = computeMissingRequiredFields({ regionCode, festivalTypes, venueType, durationDays });
+    // PHASE 6 — Series autofill이 region/venueType을 MIXED/MISSING으로 판정하면 ""(직접 선택
+    // placeholder)로 남는다 - 이 값은 실제 metadata enum이 아니므로 submit 전에 반드시 채워야
+    // 한다. durationDays=""도 같은 목록에 포함한다(Number("")===0이 그대로 request에 실리는
+    // 것을 막음). EXISTING mode에서 selectedSeries가 없으면("검색어만 있고 선택 안 함") 그
+    // 자체가 최우선 누락 사유다(ambiguous free-text path 제거).
+    const missingRequiredFields = computeMissingRequiredFields({ festivalMode, selectedSeries, regionCode, festivalTypes, venueType, durationDays });
     const canSubmit = missingRequiredFields.length === 0;
-    // 9절 — "과거 이력이 연도별로 달라 자동입력하지 않았습니다" 설명은 실제로 series 선택에서
-    // 비롯된 필드(지역/유형/장소)가 비어 있을 때만 붙인다 - 개최일수는 애초에 series가 절대
-    // 자동입력하지 않는 값이라 이 설명이 적용되지 않는다.
+    // PHASE 6 — "과거 이력이 연도별로 달라 자동입력하지 않았습니다" 설명은 실제로 series 선택에서
+    // 비롯된 필드(지역/유형/장소)가 비어 있을 때만 붙인다 - 개최일수와 "기존 축제 선택" 자체는
+    // 이 설명 대상이 아니다.
     const missingDueToSeries =
         selectedSeries !== null && (missingRequiredFields.includes("광역자치단체") || missingRequiredFields.includes("축제 유형") || missingRequiredFields.includes("장소 유형"));
+
+    // PHASE 6 — "자동 설정" 표시는 selectedSeries가 있고 현재 live 값이 그 시점의 autoFill 값과
+    // 여전히 같을 때만 켠다. 별도의 "user modified" state를 추적하지 않는 가장 단순한 구현(파생값
+    // 이라 사용자가 값을 바꾸는 순간 자동으로 꺼진다).
+    const regionAutoFilled = selectedSeries !== null && selectedSeries.fieldStatus.region === "STABLE" && regionCode === selectedSeries.autoFill.regionCode;
+    const districtAutoFilled = selectedSeries !== null && selectedSeries.fieldStatus.district === "STABLE" && district === selectedSeries.autoFill.district;
+    const festivalTypesAutoFilled =
+        selectedSeries !== null &&
+        selectedSeries.fieldStatus.festivalTypes === "STABLE" &&
+        festivalTypes.length === selectedSeries.autoFill.festivalTypes.length &&
+        festivalTypes.every((t) => (selectedSeries.autoFill.festivalTypes as string[]).includes(t));
+    const venueAutoFilled = selectedSeries !== null && selectedSeries.fieldStatus.venueType === "STABLE" && venueType === selectedSeries.autoFill.venueType;
 
     return (
         <main className="min-h-screen lg:h-screen bg-gray-50 text-gray-900 flex flex-col p-4 lg:p-6 lg:overflow-hidden">
@@ -385,98 +399,174 @@ export default function AssistantTesterPage() {
                             />
                         </div>
 
-                        <div className="flex flex-col gap-1 relative">
-                            <label className="text-sm font-medium">축제명 <span className="text-gray-500 font-normal">(선택)</span></label>
-                            <input
-                                type="text"
-                                className="border rounded px-3 py-2 text-sm"
-                                placeholder="예: 부산국제록페스티벌 (2자 이상 입력 시 과거 데이터 검색)"
-                                value={festivalName}
-                                onChange={(e) => handleFestivalNameChange(e.target.value)}
-                                onFocus={() => {
-                                    if (seriesSearchResults.length > 0) setSeriesSearchOpen(true);
-                                }}
-                                onBlur={() => setSeriesSearchOpen(false)}
-                            />
-
-                            {/* PHASE 5·2절 — 검색창의 의미(과거 데이터 존재 여부 탐색이지 입력 제한이
-                                아님)를 항상 눈에 보이는 자리에서 설명한다. selectedSeries/reset 안내가
-                                있으면 그쪽이 더 구체적이므로 이 일반 안내는 자리를 양보한다. */}
-                            {!selectedSeries && !metadataResetNotice && (
-                                <p className="text-[11px] text-gray-500 mt-0.5">
-                                    과거에 개최된 축제라면 입력 중 관련 축제를 찾아드려요. 새로운 축제라면 검색 결과가 없어도 그대로 입력할 수 있습니다.
-                                </p>
-                            )}
-
-                            {/* PHASE 5·1절(Phase 4 UX Audit P0) — stale metadata를 초기화했다는 사실을
-                                즉시 알린다. */}
-                            {metadataResetNotice && !selectedSeries && (
-                                <p className="text-[11px] text-amber-700 mt-0.5">
-                                    ⓘ 축제명을 직접 수정해 이전 축제의 자동입력 정보를 초기화했습니다 — 지역/유형/장소를 다시 선택해주세요.
-                                </p>
-                            )}
-
-                            {selectedSeries && (
-                                <p className="text-[11px] text-emerald-700 mt-0.5">
-                                    ✓ 과거 동일 축제 이력 기반 자동입력됨 ({selectedSeries.firstObservedYear}~{selectedSeries.lastObservedYear} · 과거 이력 {selectedSeries.historyCount}회) — 아래 값은 자유롭게 수정할 수 있습니다.
-                                </p>
-                            )}
-
-                            {seriesSearchOpen && (
-                                <div
-                                    className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border rounded-lg shadow-lg max-h-72 overflow-y-auto text-sm"
-                                    // mousedown이 input의 blur보다 먼저 발생하므로, 여기서 선택 클릭을
-                                    // 처리하면 blur가 먼저 dropdown을 닫아버리는 문제가 없다.
-                                    onMouseDown={(e) => e.preventDefault()}
+                        {/* PHASE 6 — 축제 구분을 가장 먼저 명시적으로 고른다(radio 대신 기존 UI
+                            톤에 맞는 segmented control). 현재 모드가 항상 채워진 배경색으로 뚜렷이
+                            드러난다. */}
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-medium">어떤 축제를 계획하고 있나요?</label>
+                            <div className="flex gap-2" role="radiogroup" aria-label="축제 구분">
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={festivalMode === "EXISTING"}
+                                    onClick={() => handleFestivalModeChange("EXISTING")}
+                                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border ${
+                                        festivalMode === "EXISTING" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                    }`}
                                 >
-                                    {seriesSearchLoading && (
-                                        <div className="px-3 py-2.5 text-xs text-gray-400">검색 중...</div>
-                                    )}
-                                    {/* PHASE 5·5절 — 결과 없음 = 입력 불가가 아니라는 것을 명시적으로
-                                        말한다. free-text 값은 이 dropdown이 전혀 건드리지 않는다. */}
-                                    {!seriesSearchLoading && seriesSearchResults.length === 0 && (
-                                        <div className="px-3 py-2.5 text-xs text-gray-500">
-                                            과거 데이터에서 일치하는 축제를 찾지 못했습니다. 새로운 축제라면 지금 입력한 이름 그대로 계속 진행할 수 있습니다.
-                                        </div>
-                                    )}
-                                    {/* PHASE 5·3절 — 결과가 "과거 데이터에서 찾은 관련 축제" 목록임을
-                                        heading으로 명시한다. FrozenSeries/SeriesGroup/historyCount 같은
-                                        내부 용어는 화면에 그대로 노출하지 않는다("과거 이력 N회"로 표현). */}
-                                    {!seriesSearchLoading && seriesSearchResults.length > 0 && (
-                                        <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 bg-gray-50 border-b sticky top-0">
-                                            과거 데이터에서 찾은 관련 축제
-                                        </div>
-                                    )}
-                                    {!seriesSearchLoading && seriesSearchResults.map((r) => (
-                                        <button
-                                            key={buildSeriesSearchResultKey(r)}
-                                            type="button"
-                                            onClick={() => handleSelectSeries(r)}
-                                            className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b last:border-0"
-                                        >
-                                            <div className="font-medium text-gray-800">{r.canonicalName}</div>
-                                            <div className="text-[11px] text-gray-500 mt-0.5">
-                                                {[
-                                                    r.fieldStatus.region === "STABLE" && r.regionCode ? REGION_DISPLAY[r.regionCode] : null,
-                                                    r.fieldStatus.festivalTypes === "STABLE" && r.autoFill.festivalTypes.length > 0
-                                                        ? r.autoFill.festivalTypes.map((t) => FESTIVAL_TYPE_DISPLAY[t]).join("/")
-                                                        : null,
-                                                    r.fieldStatus.venueType === "STABLE" && r.autoFill.venueType ? VENUE_TYPE_DISPLAY[r.autoFill.venueType] : null,
-                                                ]
-                                                    .filter(Boolean)
-                                                    .join(" · ") || "지역/유형/장소가 연도별로 달라 자동입력 불가"}
-                                            </div>
-                                            <div className="text-[11px] text-gray-400">
-                                                {r.firstObservedYear}~{r.lastObservedYear} · 과거 이력 {r.historyCount}회
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
+                                    과년도에 개최했던 축제
+                                </button>
+                                <button
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={festivalMode === "NEW"}
+                                    onClick={() => handleFestivalModeChange("NEW")}
+                                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border ${
+                                        festivalMode === "NEW" ? "bg-emerald-600 text-white border-emerald-600" : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                                    }`}
+                                >
+                                    신규 축제
+                                </button>
+                            </div>
                         </div>
 
+                        {festivalMode === "EXISTING" ? (
+                            <div className="flex flex-col gap-1 relative">
+                                <label className="text-sm font-medium">축제명 검색</label>
+                                <input
+                                    type="text"
+                                    className="border rounded px-3 py-2 text-sm"
+                                    placeholder="예: 부산국제록페스티벌 (2자 이상 입력 시 과거 데이터 검색)"
+                                    value={seriesSearchText}
+                                    onChange={(e) => handleSeriesSearchTextChange(e.target.value)}
+                                    onFocus={() => {
+                                        if (seriesSearchResults.length > 0) setSeriesSearchOpen(true);
+                                    }}
+                                    onBlur={() => setSeriesSearchOpen(false)}
+                                />
+
+                                {/* PHASE 6 — 검색어 자체는 festivalName이 아니라는 것을 항상 보이는
+                                    자리에서 설명한다. selectedSeries/reset 안내가 있으면 그쪽이 더
+                                    구체적이므로 이 일반 안내는 자리를 양보한다. */}
+                                {!selectedSeries && !metadataResetNotice && (
+                                    <p className="text-[11px] text-gray-500 mt-0.5">
+                                        과거 데이터에 있는 실제 축제를 검색해 목록에서 직접 선택해주세요. 이 입력창의 글자 자체는 최종 축제명이 아닙니다.
+                                    </p>
+                                )}
+
+                                {metadataResetNotice && !selectedSeries && (
+                                    <p className="text-[11px] text-amber-700 mt-0.5">
+                                        ⓘ 검색어를 수정해 이전 선택과 자동입력 정보를 초기화했습니다 — 목록에서 다시 선택해주세요.
+                                    </p>
+                                )}
+
+                                {seriesSearchOpen && (
+                                    <div
+                                        className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border rounded-lg shadow-lg max-h-72 overflow-y-auto text-sm"
+                                        // mousedown이 input의 blur보다 먼저 발생하므로, 여기서 선택 클릭을
+                                        // 처리하면 blur가 먼저 dropdown을 닫아버리는 문제가 없다.
+                                        onMouseDown={(e) => e.preventDefault()}
+                                    >
+                                        {seriesSearchLoading && (
+                                            <div className="px-3 py-2.5 text-xs text-gray-400">검색 중...</div>
+                                        )}
+                                        {/* PHASE 6 — EXISTING mode에서는 결과 없음이어도 free-text로
+                                            계산할 수 없다는 것을 명확히 안내하고 '신규 축제'로의 전환을
+                                            제안한다(ambiguous free-text path 제거). */}
+                                        {!seriesSearchLoading && seriesSearchResults.length === 0 && (
+                                            <div className="px-3 py-2.5 text-xs text-gray-500">
+                                                과거 데이터에서 해당 축제를 찾지 못했습니다. 새로운 축제를 계획 중이라면 위에서 &lsquo;신규 축제&rsquo;를 선택해주세요.
+                                            </div>
+                                        )}
+                                        {/* 결과가 "과거 데이터에서 찾은 관련 축제" 목록임을 heading으로
+                                            명시한다. FrozenSeries/SeriesGroup/historyCount 같은 내부 용어는
+                                            화면에 그대로 노출하지 않는다("과거 이력 N회"로 표현). */}
+                                        {!seriesSearchLoading && seriesSearchResults.length > 0 && (
+                                            <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 bg-gray-50 border-b sticky top-0">
+                                                과거 데이터에서 찾은 관련 축제
+                                            </div>
+                                        )}
+                                        {/* PHASE 6 — 비슷한 이름/동명 축제를 구분할 수 있도록 canonical
+                                            name/지역/시군구/유형/관측연도/이력 횟수를 전부 보여준다. 내부
+                                            Series ID/groupId는 노출하지 않는다. */}
+                                        {!seriesSearchLoading && seriesSearchResults.map((r) => (
+                                            <button
+                                                key={buildSeriesSearchResultKey(r)}
+                                                type="button"
+                                                onClick={() => handleSelectSeries(r)}
+                                                className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b last:border-0"
+                                            >
+                                                <div className="font-medium text-gray-800">{r.canonicalName}</div>
+                                                <div className="text-[11px] text-gray-500 mt-0.5">
+                                                    {[
+                                                        r.regionCode ? REGION_DISPLAY[r.regionCode] : null,
+                                                        r.district ?? null,
+                                                        r.fieldStatus.festivalTypes === "STABLE" && r.autoFill.festivalTypes.length > 0
+                                                            ? r.autoFill.festivalTypes.map((t) => FESTIVAL_TYPE_DISPLAY[t]).join("/")
+                                                            : null,
+                                                    ]
+                                                        .filter(Boolean)
+                                                        .join(" · ") || "지역/유형 정보가 연도별로 상이"}
+                                                </div>
+                                                <div className="text-[11px] text-gray-400">
+                                                    {r.firstObservedYear}~{r.lastObservedYear} · 과거 이력 {r.historyCount}회
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* PHASE 6 — Series 선택 즉시 별도의 시각적 블록으로 "과거 이력 기반
+                                    기본 정보"를 보여준다. STABLE/MIXED/MISSING 원문은 노출하지 않는다. */}
+                                {selectedSeries && (
+                                    <div className="mt-1 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm">
+                                        <p className="text-emerald-800 font-medium">✓ 과거 축제 데이터를 불러왔습니다.</p>
+                                        <p className="text-emerald-900 font-semibold mt-1">{selectedSeries.canonicalName}</p>
+                                        <p className="text-[11px] text-emerald-700">
+                                            과거 이력 {selectedSeries.historyCount}회 · {selectedSeries.firstObservedYear}~{selectedSeries.lastObservedYear}
+                                        </p>
+                                        <div className="mt-2 pt-2 border-t border-emerald-200 flex flex-col gap-0.5">
+                                            <p className="text-[11px] font-semibold text-emerald-700 mb-0.5">과거 이력 기반 기본 정보</p>
+                                            <SeriesFieldSummaryRow
+                                                label="광역자치단체"
+                                                status={selectedSeries.fieldStatus.region}
+                                                value={selectedSeries.autoFill.regionCode ? REGION_DISPLAY[selectedSeries.autoFill.regionCode] : null}
+                                            />
+                                            <SeriesFieldSummaryRow label="시군구" status={selectedSeries.fieldStatus.district} value={selectedSeries.autoFill.district} />
+                                            <SeriesFieldSummaryRow
+                                                label="축제 유형"
+                                                status={selectedSeries.fieldStatus.festivalTypes}
+                                                value={selectedSeries.autoFill.festivalTypes.length > 0 ? selectedSeries.autoFill.festivalTypes.map((t) => FESTIVAL_TYPE_DISPLAY[t]).join("/") : null}
+                                            />
+                                            <SeriesFieldSummaryRow
+                                                label="장소 유형"
+                                                status={selectedSeries.fieldStatus.venueType}
+                                                value={selectedSeries.autoFill.venueType ? VENUE_TYPE_DISPLAY[selectedSeries.autoFill.venueType] : null}
+                                            />
+                                        </div>
+                                        <p className="text-[11px] text-emerald-600 mt-2">아래 값들은 자유롭게 수정할 수 있습니다 — 자동 설정된 값은 원래대로 유지될 때만 표시됩니다.</p>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="flex flex-col gap-1">
+                                <label className="text-sm font-medium">축제명 <span className="text-gray-500 font-normal">(선택)</span></label>
+                                <input
+                                    type="text"
+                                    className="border rounded px-3 py-2 text-sm"
+                                    placeholder="예: 한강페스티벌 (신규 축제 이름을 자유롭게 입력하세요)"
+                                    value={festivalName}
+                                    onChange={(e) => handleNewFestivalNameChange(e.target.value)}
+                                />
+                                <p className="text-[11px] text-gray-500 mt-0.5">새로운 축제이므로 이름을 입력하지 않아도 계산할 수 있습니다.</p>
+                            </div>
+                        )}
+
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">광역자치단체</label>
+                            <label className="text-sm font-medium">
+                                광역자치단체
+                                {regionAutoFilled && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">자동 설정</span>}
+                            </label>
                             <select
                                 className="border rounded px-3 py-2 text-sm"
                                 value={regionCode}
@@ -491,10 +581,16 @@ export default function AssistantTesterPage() {
                                     <option key={r.code} value={r.code}>{r.displayName}</option>
                                 ))}
                             </select>
+                            {selectedSeries && selectedSeries.fieldStatus.region !== "STABLE" && !regionCode && (
+                                <p className="text-[11px] text-gray-500 mt-0.5">{seriesFieldHint(selectedSeries.fieldStatus.region)}</p>
+                            )}
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">시군구 <span className="text-gray-500 font-normal">(선택)</span></label>
+                            <label className="text-sm font-medium">
+                                시군구 <span className="text-gray-500 font-normal">(선택)</span>
+                                {districtAutoFilled && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">자동 설정</span>}
+                            </label>
                             <select
                                 className="border rounded px-3 py-2 text-sm"
                                 value={district}
@@ -506,19 +602,20 @@ export default function AssistantTesterPage() {
                                     <option key={d} value={d}>{d}</option>
                                 ))}
                             </select>
-                            {/* PHASE 5·10절 — district는 estimate 필수값이 아니라 계산을 막지 않는다.
-                                다만 series를 선택했는데 비어 있으면(부산국제록페스티벌처럼 과거 이력에
-                                시군구 정보 자체가 없는 경우 포함) 이유를 알려준다 - "MISSING" 같은 내부
-                                용어는 쓰지 않는다. */}
+                            {/* district는 estimate 필수값이 아니라 계산을 막지 않는다. 다만 series를
+                                선택했는데 비어 있으면(부산국제록페스티벌처럼 과거 이력에 시군구 정보
+                                자체가 없는 경우 포함) 이유를 알려준다 - "MISSING" 같은 내부 용어는
+                                쓰지 않는다. */}
                             {selectedSeries && selectedSeries.fieldStatus.district !== "STABLE" && district === "" && (
-                                <p className="text-[11px] text-gray-500 mt-0.5">
-                                    과거 이력에 시군구 정보가 없거나 연도별로 달라 자동입력하지 않았습니다(선택 입력 항목입니다).
-                                </p>
+                                <p className="text-[11px] text-gray-500 mt-0.5">{seriesFieldHint(selectedSeries.fieldStatus.district)}(선택 입력 항목입니다)</p>
                             )}
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">축제 유형 <span className="text-gray-500 font-normal">(복수 선택 가능)</span></label>
+                            <label className="text-sm font-medium">
+                                축제 유형 <span className="text-gray-500 font-normal">(복수 선택 가능)</span>
+                                {festivalTypesAutoFilled && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">자동 설정</span>}
+                            </label>
                             <div className="flex flex-wrap gap-3">
                                 {metadata?.festivalTypes.map((t) => (
                                     <label key={t.code} className="flex items-center gap-1.5 text-sm">
@@ -531,10 +628,16 @@ export default function AssistantTesterPage() {
                                     </label>
                                 ))}
                             </div>
+                            {selectedSeries && selectedSeries.fieldStatus.festivalTypes !== "STABLE" && festivalTypes.length === 0 && (
+                                <p className="text-[11px] text-gray-500 mt-0.5">{seriesFieldHint(selectedSeries.fieldStatus.festivalTypes)}</p>
+                            )}
                         </div>
 
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">장소 유형</label>
+                            <label className="text-sm font-medium">
+                                장소 유형
+                                {venueAutoFilled && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">자동 설정</span>}
+                            </label>
                             <select
                                 className="border rounded px-3 py-2 text-sm"
                                 value={venueType}
@@ -549,9 +652,15 @@ export default function AssistantTesterPage() {
                                     <option key={v.code} value={v.code}>{v.displayName}</option>
                                 ))}
                             </select>
+                            {selectedSeries && selectedSeries.fieldStatus.venueType !== "STABLE" && !venueType && (
+                                <p className="text-[11px] text-gray-500 mt-0.5">{seriesFieldHint(selectedSeries.fieldStatus.venueType)}</p>
+                            )}
                         </div>
 
-                        <div className="flex flex-col gap-1">
+                        {/* PHASE 6 — durationDays는 절대 Series history에서 자동입력하지 않는다는
+                            기존 정책을 유지하면서, "올해 계획 정보"로 시각적 구분만 더한다. */}
+                        <div className="flex flex-col gap-1 pt-2 border-t border-gray-100">
+                            <p className="text-[11px] font-semibold text-gray-400">올해 계획 정보</p>
                             <label className="text-sm font-medium">
                                 개최 일수 <span className="text-gray-500 font-normal">(직접 입력 — Series를 선택해도 자동입력되지 않습니다)</span>
                             </label>
@@ -564,6 +673,7 @@ export default function AssistantTesterPage() {
                                 value={durationDays}
                                 onChange={(e) => setDurationDays(e.target.value === "" ? "" : Number(e.target.value))}
                             />
+                            <p className="text-[11px] text-gray-500">올해 계획한 개최기간을 직접 입력해주세요.</p>
                         </div>
 
                         <button
@@ -573,8 +683,8 @@ export default function AssistantTesterPage() {
                         >
                             {loading ? "계산 중..." : "다년도 계획예산 계산"}
                         </button>
-                        {/* PHASE 5·9절 — 비활성 사유를 기존 noSample 배너와 같은 스타일(옅은 amber 박스)로
-                            더 눈에 띄게 표시한다 - "너무 강한 error UI"는 피하되 바로 보이게 한다. */}
+                        {/* 비활성 사유를 기존 noSample 배너와 같은 스타일(옅은 amber 박스)로 더
+                            눈에 띄게 표시한다 - "너무 강한 error UI"는 피하되 바로 보이게 한다. */}
                         {!canSubmit && (
                             <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
                                 계산하려면 다음 정보를 입력해주세요: <span className="font-semibold">{missingRequiredFields.join(" · ")}</span>
@@ -606,7 +716,10 @@ export default function AssistantTesterPage() {
                             <dt className="text-gray-500">기간</dt>
                             <dd className="font-medium">{durationDays === "" ? "(미입력)" : `${durationDays}일`}</dd>
                             <dt className="text-gray-500">축제명</dt>
-                            <dd className="font-medium">{festivalName.trim() || "(없음 — 신규 축제로 취급)"}</dd>
+                            <dd className="font-medium">
+                                {festivalName.trim() ||
+                                    (festivalMode === "EXISTING" ? "(기존 축제를 선택해주세요)" : "(없음 — 신규 축제로 취급)")}
+                            </dd>
                             <dt className="text-gray-500">Reference policy</dt>
                             <dd className="font-medium">HISTORICAL_ONLY <span className="text-gray-400 font-normal">(고정)</span></dd>
                         </dl>
@@ -620,14 +733,7 @@ export default function AssistantTesterPage() {
                             좌측에서 조건을 입력하고 계산을 실행하면 결과가 여기 표시됩니다.
                         </div>
                     )}
-                    {result && (
-                        <ResultPane
-                            result={result}
-                            sensitivityRows={sensitivityRows}
-                            sensitivityLoading={sensitivityLoading}
-                            onRunSensitivity={runDurationSensitivity}
-                        />
-                    )}
+                    {result && <ResultPane result={result} requestedDurationDays={submittedDurationDays} />}
                 </section>
             </div>
         </main>
@@ -678,24 +784,14 @@ function seriesHistorySummary(result: MultiYearBudgetEstimateResponse): string {
     }
 }
 
-function ResultPane({
-    result,
-    sensitivityRows,
-    sensitivityLoading,
-    onRunSensitivity,
-}: {
-    result: MultiYearBudgetEstimateResponse;
-    sensitivityRows: SensitivityRow[] | null;
-    sensitivityLoading: boolean;
-    onRunSensitivity: () => void;
-}) {
+function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudgetEstimateResponse; requestedDurationDays: number | null }) {
     const isSeries = result.estimateBasis === "SERIES_HISTORY_MEDIAN";
     const seriesDisplay = resolveSeriesDisplayState(result.estimateBasis, result.seriesSignal);
     const noSample = result.sampleCount === 0;
 
     return (
         <div className="flex flex-col gap-4">
-            {/* 1. 현재 입력 결과 — 핵심 결과 4개 */}
+            {/* 6절 — 핵심 결과 4개 */}
             <div className="grid grid-cols-2 gap-3">
                 <MetricBox label="예상 예산" value={fmt(result.estimatedBudgetKrw)} />
                 <MetricBox label="추천 계획 예산" value={fmt(result.recommendedBudgetKrw)} highlight />
@@ -713,12 +809,10 @@ function ResultPane({
                 </div>
             )}
 
-            {/* 2. 추천 공식 검산(표시 전용, production 값을 대체하지 않음) */}
-            <RecommendationCheckCard result={result} />
-
-            {/* 3. 신뢰도 / 근거 */}
+            {/* 신뢰도 상세 설명 — 등급/이유/의미를 한 카드에서 (reliabilityReason은 항상 API 원문 그대로) */}
             <ReliabilityCard result={result} />
 
+            {/* 7절 — 예산 산정 근거 */}
             <Card title="예산 산정 근거">
                 <FieldGrid
                     rows={[
@@ -735,6 +829,10 @@ function ResultPane({
                 />
             </Card>
 
+            {/* 10절 — 추천 공식 검증(표시 전용, production 값을 대체하지 않음) */}
+            <RecommendationCheckCard result={result} />
+
+            {/* 8절 — Series 경로 상세(계산 경로가 SERIES일 때 가장 눈에 띄게) */}
             {seriesDisplay.kind === "SERIES_APPLIED" && (
                 <SeriesHistoryCard seriesDisplay={seriesDisplay} />
             )}
@@ -744,15 +842,7 @@ function ResultPane({
                 </div>
             )}
 
-            {/* 4. Duration sensitivity */}
-            <DurationSensitivityCard
-                result={result}
-                rows={sensitivityRows}
-                loading={sensitivityLoading}
-                onRun={onRunSensitivity}
-            />
-
-            {/* 5. 상세 알고리즘 diagnostic — 알고리즘 적용값 / 데이터 사용 현황 */}
+            {/* 15절 — 알고리즘 적용값 / 11절 — 데이터 사용 현황 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <AlgorithmValuesCard result={result} />
                 <DataUsageCard result={result} />
@@ -766,7 +856,9 @@ function ResultPane({
             {result.yearWeightBreakdown.length > 0 && <YearWeightCard result={result} />}
 
             {/* 17절 — Top peer candidates */}
-            {result.topCandidates.length > 0 && <CandidatesCard candidates={result.topCandidates} />}
+            {result.topCandidates.length > 0 && (
+                <CandidatesCard candidates={result.topCandidates} sampleCount={result.sampleCount} requestedDurationDays={requestedDurationDays} />
+            )}
 
             {/* 20절 — Raw JSON(기본 닫힘) */}
             <details className="bg-white rounded-xl shadow p-4 text-xs">
@@ -775,6 +867,24 @@ function ResultPane({
                     {JSON.stringify(result, null, 2)}
                 </pre>
             </details>
+        </div>
+    );
+}
+
+/**
+ * PHASE 6 — "과거 이력 기반 기본 정보" 요약 블록의 한 줄. STABLE이면 실제 값 + "자동 설정"
+ * 태그, MIXED/MISSING이면 각각 "직접 선택"/"정보 없음"만 보여준다(내부 STABLE/MIXED/MISSING
+ * 문자열 자체는 노출하지 않음).
+ */
+function SeriesFieldSummaryRow({ label, status, value }: { label: string; status: "STABLE" | "MIXED" | "MISSING"; value: string | null }) {
+    const displayValue = status === "STABLE" ? value ?? "—" : status === "MIXED" ? "직접 선택" : "정보 없음";
+    return (
+        <div className="flex items-center justify-between text-xs py-0.5">
+            <span className="text-emerald-700">{label}</span>
+            <span className="flex items-center gap-1.5">
+                <span className="font-medium text-emerald-900">{displayValue}</span>
+                {status === "STABLE" && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-200 text-emerald-800 rounded">자동 설정</span>}
+            </span>
         </div>
     );
 }
@@ -853,195 +963,6 @@ function RecommendationCheckCard({ result }: { result: MultiYearBudgetEstimateRe
                 <div className="pt-1 border-t mt-1">API recommendedBudgetKrw = {fmt(result.recommendedBudgetKrw)}</div>
                 <div>일치 = {pass ? "✓" : `✗ (차이 ${fmt(Math.abs(expected - result.recommendedBudgetKrw))})`}</div>
             </div>
-        </Card>
-    );
-}
-
-/**
- * Duration sensitivity — 동일 조건에서 durationDays만 바꿨을 때 Peer 후보 구성/P60/예상·추천
- * 예산이 얼마나 달라지는지 확인한다(실측 진단: 서울/문화예술/마을형, planningYear=2027에서
- * 3→7→15→30일 recommendedBudget이 3.38억→2.85억→2.00억→2.85억로 비단조 변화하는 사례를 확인함).
- *
- * - 별도 계산 로직 없음 - `estimateMultiYearBudget()`(production API)을 durationDays만 바꿔
- *   그대로 재호출한다(page.tsx의 `runDurationSensitivity` 참고).
- * - candidate 교체 건수를 이 UI가 임의로 계산하지 않는다 - production API는 topCandidates(최대
- *   10건)만 반환하고 finalSample 전체(최대 50건)는 내려주지 않으므로, "overlap"은 반드시
- *   "상위 표시 후보(top 10) 기준"이라고 명시한다. full churn 수치가 필요하면 별도 debug API
- *   설계가 필요하다(이번 UI 작업 범위 밖).
- * - 실측 결과, churn 건수 자체보다 "P60 백분위 근처의 후보가 바뀌는지"가 recommendation 변화폭에
- *   더 큰 영향을 준다는 것이 확인됐다(예: 84%가 교체된 3→7 전환은 P60이 15.6%만 움직인 반면,
- *   10%만 교체된 7→15/15→30 전환은 P60이 30~43% 움직임) - 이 통찰은 문구로만 반영하고, UI가
- *   기여도(%) 를 추측해 수치화하지는 않는다.
- */
-function DurationSensitivityCard({
-    result,
-    rows,
-    loading,
-    onRun,
-}: {
-    result: MultiYearBudgetEstimateResponse;
-    rows: SensitivityRow[] | null;
-    loading: boolean;
-    onRun: () => void;
-}) {
-    const isSeriesBase = result.estimateBasis === "SERIES_HISTORY_MEDIAN";
-    const successRows = (rows ?? []).filter((r): r is Extract<SensitivityRow, { status: "success" }> => r.status === "success");
-
-    // 8절 — 비단조 변화 감지: recommendedBudgetKrw가 duration 오름차순에서 한 번이라도 감소하면.
-    // Series 기반 결과는 recommendedBudgetKrw가 duration과 무관하게 항상 동일하므로(§1 참고)
-    // 구조적으로 이 판정에서 감소가 나오지 않는다 - 오류가 아니라 정상 동작이다.
-    let nonMonotonic = false;
-    for (let i = 1; i < successRows.length; i++) {
-        if (successRows[i].data.recommendedBudgetKrw < successRows[i - 1].data.recommendedBudgetKrw) {
-            nonMonotonic = true;
-            break;
-        }
-    }
-
-    const maxRecommended = Math.max(1, ...successRows.map((r) => r.data.recommendedBudgetKrw));
-
-    function driverLabel(r: MultiYearBudgetEstimateResponse): string {
-        if (r.estimateBasis !== "PEER_SIMILARITY") return "— (Series 고정)";
-        return r.p60Krw >= r.estimatedBudgetKrw ? "P60" : "예상 예산";
-    }
-
-    /** 11절 — topCandidates(최대 10건)만으로 계산하는 overlap. festivalName+sourceYear를 근사
-     *  식별자로 쓴다(API가 안정적인 고유키를 내려주지 않으므로) - "상위 표시 후보 기준"이라고
-     *  항상 명시하고, production finalSample 50건 전체 기준 수치(8/50 같은)는 절대 주장하지 않는다. */
-    function topCandidateOverlap(prev: MultiYearBudgetEstimateResponse, cur: MultiYearBudgetEstimateResponse): { overlap: number; total: number } {
-        const prevKeys = new Set(prev.topCandidates.map((c) => `${c.festivalName}|${c.sourceYear}`));
-        const curKeys = cur.topCandidates.map((c) => `${c.festivalName}|${c.sourceYear}`);
-        const overlap = curKeys.filter((k) => prevKeys.has(k)).length;
-        return { overlap, total: cur.topCandidates.length };
-    }
-
-    return (
-        <Card title="Duration sensitivity">
-            {/* PHASE 5·11절 — Series 경로일 때, 아래에서 기간을 바꿔도 금액이 그대로인 것을 버그로
-                오해하지 않도록 기존 설명을 조금 더 눈에 띄는 박스로 옮긴다(문구/알고리즘은 그대로,
-                시각적 위치·크기만 조정). */}
-            {isSeriesBase ? (
-                <div className="mb-3 p-2.5 bg-blue-50 border border-blue-100 rounded-lg text-sm text-blue-900">
-                    동일 축제 이력이 있는 경우 개최기간보다 해당 축제 자체의 과거 예산 이력을 우선합니다. 개최기간은 현재 Series 예상·추천 예산 산식에 직접 반영되지 않습니다(estimate=CPI 보정 median, recommendation=estimate×1.05 — 둘 다 durationDays를 입력으로 쓰지 않음) — 아래에서 기간을 바꿔도 금액이 그대로라면 정상 동작입니다.
-                    <p className="text-xs text-blue-700 mt-1">Peer(유사 축제) 경로에서는 개최기간이 실제 계산에 사용됩니다 — 아래 기간 민감도는 그 Peer 기준의 보조 비교입니다.</p>
-                </div>
-            ) : (
-                <p className="text-xs text-gray-500 mb-3">
-                    동일 축제 조건(festivalName/지역/유형/장소/계획연도 고정)에서 durationDays만 바꿔 production API를 다시 호출합니다 — 이 결과는 최종 추천값에 직접 영향을 줍니다.
-                </p>
-            )}
-
-            {!rows && (
-                <button
-                    type="button"
-                    onClick={onRun}
-                    disabled={loading}
-                    className="bg-indigo-600 text-white rounded-lg px-4 py-2 text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {loading ? "확인 중..." : "기간 민감도 확인 (3/7/15/30일 + 현재 입력)"}
-                </button>
-            )}
-
-            {rows && (
-                <div className="flex flex-col gap-3">
-                    {nonMonotonic && (
-                        <div className="flex flex-col gap-1">
-                            <span className="inline-flex items-center gap-1 self-start px-2 py-1 rounded-full text-xs font-semibold border bg-amber-50 text-amber-800 border-amber-200">
-                                ⚠ 기간 증가에 따른 비단조 변화 감지
-                            </span>
-                            <p className="text-xs text-gray-700 mt-1">
-                                기간 민감도 주의 — 유사 축제 기반 추정에서는 개최기간이 달라지면 비교 대상 축제의 순위와 최종 표본 구성이 바뀔 수 있습니다. 따라서 기간이 증가해도 예상·추천 예산이 항상 증가하지는 않습니다.
-                            </p>
-                            <p className="text-[11px] text-gray-400">
-                                이는 개최기간 자체의 단순 배율뿐 아니라, duration similarity에 따른 Peer 후보 구성 변화의 영향을 받기 때문입니다. 알고리즘 오류가 아니라 현재 Peer 모델의 known sensitivity입니다.
-                            </p>
-                        </div>
-                    )}
-
-                    {/* 15절 — LOW+Peer일 때만 연결 설명을 추가한다. Series는 computePlanningReliability의
-                        seriesApplied 분기 구조상 LOW가 나올 수 없으므로(reliability.ts) 이 조합은 발생하지
-                        않는다 - reliabilityTier 자체는 이 카드가 절대 바꾸지 않는다. */}
-                    {!isSeriesBase && result.reliabilityTier === "LOW" && (
-                        <p className="text-xs text-gray-500">
-                            동일 축제 자체 이력 대신 유사 축제 데이터를 사용하는 결과이므로, 기간 변경에 따른 비교 표본 변화도 함께 확인하세요.
-                        </p>
-                    )}
-
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-xs border-collapse">
-                            <thead>
-                                <tr className="bg-gray-50">
-                                    <th className="text-left px-2 py-1.5 border-b">기간</th>
-                                    <th className="text-left px-2 py-1.5 border-b">basis</th>
-                                    <th className="text-left px-2 py-1.5 border-b">신뢰도</th>
-                                    <th className="text-right px-2 py-1.5 border-b">예상 예산</th>
-                                    <th className="text-right px-2 py-1.5 border-b">추천 계획 예산</th>
-                                    <th className="text-right px-2 py-1.5 border-b">P60</th>
-                                    <th className="text-left px-2 py-1.5 border-b">결정값</th>
-                                    <th className="text-right px-2 py-1.5 border-b">표본수</th>
-                                    <th className="text-right px-2 py-1.5 border-b">평균유사도</th>
-                                    <th className="text-left px-2 py-1.5 border-b">fallback</th>
-                                    <th className="text-right px-2 py-1.5 border-b">Δ추천</th>
-                                    <th className="text-left px-2 py-1.5 border-b">Top10 overlap</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rows.map((row, i) => {
-                                    const prevRow = i > 0 ? rows[i - 1] : null;
-                                    const prevSuccess = prevRow?.status === "success" ? prevRow : null;
-                                    const curSuccess = row.status === "success" ? row : null;
-                                    const delta = prevSuccess && curSuccess ? ((curSuccess.data.recommendedBudgetKrw - prevSuccess.data.recommendedBudgetKrw) / prevSuccess.data.recommendedBudgetKrw) * 100 : null;
-                                    const overlap = prevSuccess && curSuccess ? topCandidateOverlap(prevSuccess.data, curSuccess.data) : null;
-                                    return (
-                                        <tr key={row.durationDays} className={`border-b last:border-0 ${row.isCurrent ? "bg-indigo-50 font-medium" : ""}`}>
-                                            <td className="px-2 py-1.5">{row.durationDays}일{row.isCurrent && <span className="text-[10px] text-indigo-600 ml-1">(현재 입력)</span>}</td>
-                                            {row.status === "loading" && <td className="px-2 py-1.5 text-gray-400" colSpan={10}>조회 중...</td>}
-                                            {row.status === "error" && <td className="px-2 py-1.5 text-red-600" colSpan={10}>실패: {row.error}</td>}
-                                            {row.status === "success" && (
-                                                <>
-                                                    <td className="px-2 py-1.5 text-gray-500">{row.data.estimateBasis === "SERIES_HISTORY_MEDIAN" ? "SERIES" : "PEER"}</td>
-                                                    <td className="px-2 py-1.5 text-gray-500">{row.data.reliabilityTier}</td>
-                                                    <td className="px-2 py-1.5 text-right">{fmt(row.data.estimatedBudgetKrw)}</td>
-                                                    <td className="px-2 py-1.5 text-right font-semibold">{fmt(row.data.recommendedBudgetKrw)}</td>
-                                                    <td className="px-2 py-1.5 text-right text-gray-500">{fmt(row.data.p60Krw)}</td>
-                                                    <td className="px-2 py-1.5 text-gray-500">{driverLabel(row.data)}</td>
-                                                    <td className="px-2 py-1.5 text-right text-gray-500">{row.data.sampleCount}</td>
-                                                    <td className="px-2 py-1.5 text-right text-gray-500">{(row.data.averageSimilarity * 100).toFixed(1)}%</td>
-                                                    <td className="px-2 py-1.5 text-gray-500">{FALLBACK_LEVEL_LABEL[row.data.fallbackLevel as FallbackLevel] ?? row.data.fallbackLevel}</td>
-                                                    <td className={`px-2 py-1.5 text-right ${delta !== null && delta < 0 ? "text-red-600" : delta !== null && delta > 0 ? "text-emerald-600" : "text-gray-400"}`}>
-                                                        {delta !== null ? `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%` : "—"}
-                                                    </td>
-                                                    <td className="px-2 py-1.5 text-gray-500">{overlap ? `${overlap.overlap}/${overlap.total}(top10 기준)` : "—"}</td>
-                                                </>
-                                            )}
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    {/* 12절 — 추천 계획 예산 horizontal bar(새 chart library 없이 Tailwind div width만) */}
-                    <div className="flex flex-col gap-1">
-                        {successRows.map((row) => (
-                            <div key={row.durationDays} className="flex items-center gap-2 text-xs">
-                                <span className="w-10 text-gray-500">{row.durationDays}일</span>
-                                <div className="flex-1 bg-gray-100 rounded h-4 overflow-hidden">
-                                    <div
-                                        className={`h-full rounded ${row.isCurrent ? "bg-indigo-500" : "bg-indigo-300"}`}
-                                        style={{ width: `${(row.data.recommendedBudgetKrw / maxRecommended) * 100}%` }}
-                                    />
-                                </div>
-                                <span className="w-16 text-right text-gray-600">{fmtEok(row.data.recommendedBudgetKrw)}</span>
-                            </div>
-                        ))}
-                    </div>
-
-                    <button type="button" onClick={onRun} disabled={loading} className="self-start text-xs text-gray-500 underline disabled:opacity-50">
-                        {loading ? "확인 중..." : "다시 확인"}
-                    </button>
-                </div>
-            )}
         </Card>
     );
 }
@@ -1261,9 +1182,49 @@ function YearWeightCard({ result }: { result: MultiYearBudgetEstimateResponse })
     );
 }
 
-function CandidatesCard({ candidates }: { candidates: MultiYearPredictionCandidateDto[] }) {
+/**
+ * PHASE 7 — production 코드(lib/multiyear/baseline-estimator.ts의 selectFinalSample/
+ * computeCoreStats, lib/multiyear/planning-estimator.ts의 estimateForPlanning)에 정확히 맞춘
+ * 설명만 담는다. 확인된 사실:
+ * - topCandidates는 finalSample(유사도 threshold 통과 + weight 내림차순 정렬 + 최대 50건 컷)의
+ *   앞 10건일 뿐이다 - 별도로 다시 추출한 집합이 아니다. 정렬 순서 그대로 잘라낸 것이므로 항상
+ *   "유사도가 가장 높은 10건"이다.
+ * - 하지만 예상 예산/추천 예산/P25~P75/가중평균 등 실제 통계는 finalSample 전체(최대 50건)로
+ *   계산되고, 화면에 보이는 10건만으로 계산되지 않는다(estimateForPlanning: computeCoreStats(fs, ...)
+ *   가 먼저 fs.finalSample 전체로 실행되고, topCandidates는 그 뒤 slice(0,10)으로 표시용만 따로 만듦).
+ * - 정렬 기준은 weight(=similarity²) 내림차순이고, weight는 similarity의 단조 증가 함수이므로
+ *   "유사도 높은 순"과 사실상 같은 순서다. exact tie만 결정적 규칙(sourceSha256|sourceSheet|
+ *   sourceRow)으로 2차 정렬된다 - 재현성을 위한 규칙일 뿐 "더 좋은 후보"라는 의미가 아니다.
+ * - "과거 계획 예산"(originalBudgetKrw)은 CPI 보정도, winsorize도, 기간보정도 전혀 거치지 않은
+ *   원본 과거 예산이다(Peer는 CPI OFF 정책 그대로).
+ * - "N일 기준 조정 예산"(durationAdjustedBudgetKrw)은 adjustDuration(원 예산, sourceDuration,
+ *   목표 기간) = 원 예산 × clamp(목표일수/과거일수, 0.5, 2.0)^0.55 의 결과다. sourceDuration이
+ *   없는(null) 후보는 이 함수가 원 예산을 그대로 반환한다(무보정) - 후보에서 제외되지 않는다.
+ * - 실제 통계 계산(P25~P75/가중평균/예상 예산)에는 이 조정 예산에 winsorize(같은 유형 broad
+ *   population 기준 상하위 5% clip, 기간보정 다음 단계)까지 한 번 더 적용된 값이 들어간다 -
+ *   그 winsorize 이후 값은 API가 별도 필드로 내려주지 않으므로 이 표에는 표시할 수 없다(추측 금지,
+ *   해당 사실을 그대로 안내).
+ */
+function CandidatesCard({
+    candidates,
+    sampleCount,
+    requestedDurationDays,
+}: {
+    candidates: MultiYearPredictionCandidateDto[];
+    sampleCount: number;
+    requestedDurationDays: number | null;
+}) {
+    const adjustedHeader = requestedDurationDays !== null ? `${requestedDurationDays}일 기준 조정 예산` : "조정 예산";
     return (
-        <Card title={`Top peer candidates (상위 ${candidates.length}건)`}>
+        <Card title={`계산에 사용된 유사 축제 표본 중 상위 ${candidates.length}건`}>
+            <p className="text-xs text-gray-600 mb-2">
+                현재 입력 조건과 유사한 과거 축제를 유사도 순으로 보여줍니다. 최종 계산(예상 예산·추천 예산·P25~P75 등)에는 아래
+                표에 보이는 {candidates.length}건만이 아니라, 선택된 전체 Peer 후보군 {sampleCount}건이 사용됩니다.
+            </p>
+            <p className="text-[11px] text-gray-400 mb-3">
+                정렬 기준: 축제 유형·지역·장소 유형·개최기간의 유사도를 종합한 similarity가 높은 순(통계 가중치 = similarity²
+                이므로 사실상 같은 순서입니다).
+            </p>
             <div className="overflow-x-auto max-h-72 overflow-y-auto">
                 <table className="w-full text-xs border-collapse">
                     <thead className="sticky top-0 bg-white">
@@ -1272,9 +1233,9 @@ function CandidatesCard({ candidates }: { candidates: MultiYearPredictionCandida
                             <th className="text-left px-2 py-1.5 border-b">연도</th>
                             <th className="text-left px-2 py-1.5 border-b">지역</th>
                             <th className="text-left px-2 py-1.5 border-b">유형</th>
-                            <th className="text-right px-2 py-1.5 border-b">기간</th>
-                            <th className="text-right px-2 py-1.5 border-b">원 예산</th>
-                            <th className="text-right px-2 py-1.5 border-b">조정 예산</th>
+                            <th className="text-right px-2 py-1.5 border-b">개최기간</th>
+                            <th className="text-right px-2 py-1.5 border-b">과거 계획 예산</th>
+                            <th className="text-right px-2 py-1.5 border-b">{adjustedHeader}</th>
                             <th className="text-right px-2 py-1.5 border-b">유사도</th>
                             <th className="text-right px-2 py-1.5 border-b">weight</th>
                             <th className="text-left px-2 py-1.5 border-b">fallback 단계</th>
@@ -1287,7 +1248,9 @@ function CandidatesCard({ candidates }: { candidates: MultiYearPredictionCandida
                                 <td className="px-2 py-1.5 text-gray-500">{c.sourceYear}</td>
                                 <td className="px-2 py-1.5 text-gray-500">{c.region ?? "—"}{c.district ? `/${c.district}` : ""}</td>
                                 <td className="px-2 py-1.5 text-gray-500">{c.festivalType}</td>
-                                <td className="px-2 py-1.5 text-right text-gray-500">{c.durationDays ?? "—"}</td>
+                                <td className="px-2 py-1.5 text-right text-gray-500">
+                                    {c.durationDays !== null ? `${c.durationDays}일` : "정보 없음"}
+                                </td>
                                 <td className="px-2 py-1.5 text-right">{fmt(c.originalBudgetKrw)}</td>
                                 <td className="px-2 py-1.5 text-right">{fmt(c.durationAdjustedBudgetKrw)}</td>
                                 <td className="px-2 py-1.5 text-right text-gray-500">{(c.similarity * 100).toFixed(1)}%</td>
@@ -1298,9 +1261,33 @@ function CandidatesCard({ candidates }: { candidates: MultiYearPredictionCandida
                     </tbody>
                 </table>
             </div>
-            <p className="text-[11px] text-gray-400 mt-2">
-                유형/지역/장소/기간 각각의 세부 유사도 점수(sub-score)는 현재 API가 반환하지 않습니다 — 종합 유사도(similarity)와 최종 반영 weight(finalWeight)만 표시됩니다.
-            </p>
+            <div className="mt-2 flex flex-col gap-1">
+                <p className="text-[11px] text-gray-400">
+                    과거 축제 기간이 현재 계획({requestedDurationDays !== null ? `${requestedDurationDays}일` : "입력한 개최일수"})보다
+                    짧으면 조정 예산이 커지고, 길면 작아질 수 있습니다(기간이 같으면 조정 예산 = 과거 계획 예산). 다만 기간 차이가
+                    아주 클 때는 보정 비율 자체가 0.5~2.0배 범위로 제한됩니다.
+                </p>
+                <p className="text-[11px] text-gray-400">
+                    개최기간 정보가 없는(&ldquo;정보 없음&rdquo;) 과거 축제는 기간 보정을 적용하지 않습니다 — 조정 예산이 과거 계획
+                    예산과 동일하게 표시됩니다.
+                </p>
+                <p className="text-[11px] text-gray-400">
+                    유형/지역/장소/기간 각각의 세부 유사도 점수(sub-score)는 현재 API가 반환하지 않습니다 — 종합 유사도(similarity)와
+                    최종 반영 weight(finalWeight)만 표시됩니다.
+                </p>
+                <p className="text-[11px] text-gray-400">
+                    이 표의 과거 계획 예산/조정 예산은 원본 값입니다. 실제 통계 계산(예상 예산·P25~P75 등)에는 이상치를 완화하기
+                    위한 winsorize(같은 유형 축제 전체 기준 상하위 5% 클리핑) 처리가 조정 예산에 추가로 한 번 더 적용된 값이
+                    쓰이며, 그 값은 이 표에 별도로 표시되지 않습니다.
+                </p>
+            </div>
+            <details className="mt-2 text-[11px] text-gray-400">
+                <summary className="cursor-pointer">정렬 세부 규칙(개발자용)</summary>
+                <p className="mt-1">
+                    유사도(정확히는 그 제곱값인 통계 가중치)가 완전히 같은 후보끼리는 재현성을 위한 결정적 규칙(원본 데이터의
+                    소스 파일·시트·행 위치 기준)으로 순서만 고정합니다 — &ldquo;더 좋은 후보&rdquo;라는 의미는 아닙니다.
+                </p>
+            </details>
         </Card>
     );
 }
