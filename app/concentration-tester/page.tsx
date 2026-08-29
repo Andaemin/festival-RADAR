@@ -5,7 +5,6 @@ import {
     MayoSelect,
     MayoBtn,
     MayoCard,
-    MayoInput,
     MayoLoadingSpinner,
     MayoAlert,
     MayoBadge,
@@ -192,37 +191,36 @@ function getDayLabel(ymd: string) {
 export default function ConcentrationTesterPage() {
     const [areaCd, setAreaCd] = useState("");
     const [signguCd, setSignguCd] = useState("");
-    const [tAtsNm, setTAtsNm] = useState("");
+    const [selectedAttraction, setSelectedAttraction] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [items, setItems] = useState<ConcentrationItem[]>([]);
+    const [allItems, setAllItems] = useState<ConcentrationItem[]>([]);
     const [totalCount, setTotalCount] = useState(0);
 
     const districts = SIGNGU_CODES[areaCd] ?? [];
 
+    // 시군구 전체 데이터 불러오기
     async function handleSearch() {
         if (!areaCd || !signguCd) {
             setError("시도와 시군구를 선택해주세요.");
             return;
         }
-        if (!tAtsNm.trim()) {
-            setError("관광지명을 입력해주세요.");
-            return;
-        }
         setError(null);
         setLoading(true);
-        setItems([]);
+        setAllItems([]);
+        setSelectedAttraction("");
 
         try {
             const params = new URLSearchParams({ areaCd, signguCd, numOfRows: "1000" });
-            params.set("tAtsNm", tAtsNm.trim());
-
             const res = await fetch(`/api/v1/concentration?${params}`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.message ?? "조회 실패");
 
-            setItems(data.items);
+            setAllItems(data.items);
             setTotalCount(data.totalCount);
+            if (data.items.length === 0) {
+                setError("해당 지역의 관광지 데이터가 없습니다.");
+            }
         } catch (e) {
             setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
         } finally {
@@ -232,14 +230,20 @@ export default function ConcentrationTesterPage() {
 
     // 관광지 목록 (고유)
     const attractions = useMemo(() => {
-        const set = new Set(items.map((i) => i.tAtsNm));
+        const set = new Set(allItems.map((i) => i.tAtsNm));
         return [...set].sort();
-    }, [items]);
+    }, [allItems]);
 
-    // 관광지별 평균 집중률
+    // 선택된 관광지의 데이터만 필터
+    const items = useMemo(() => {
+        if (!selectedAttraction) return [];
+        return allItems.filter((i) => i.tAtsNm === selectedAttraction);
+    }, [allItems, selectedAttraction]);
+
+    // 관광지별 평균 집중률 (테이블용 - 전체 관광지)
     const attractionAvg = useMemo(() => {
         const map = new Map<string, number[]>();
-        for (const item of items) {
+        for (const item of allItems) {
             const arr = map.get(item.tAtsNm) ?? [];
             arr.push(Number(item.cnctrRate));
             map.set(item.tAtsNm, arr);
@@ -253,34 +257,20 @@ export default function ConcentrationTesterPage() {
                 count: rates.length,
             }))
             .sort((a, b) => b.avg - a.avg);
-    }, [items]);
+    }, [allItems]);
 
-    // 날짜별 전체 평균 집중률 (라인 차트용)
+    // 선택된 관광지의 일별 집중률 (라인 차트용)
     const dailyAvg = useMemo(() => {
-        const map = new Map<string, number[]>();
-        for (const item of items) {
-            const arr = map.get(item.baseYmd) ?? [];
-            arr.push(Number(item.cnctrRate));
-            map.set(item.baseYmd, arr);
-        }
-        return [...map.entries()]
-            .sort(([a], [b]) => a.localeCompare(b))
-            .map(([ymd, rates]) => ({
-                date: `${ymd.slice(4, 6)}/${ymd.slice(6, 8)}(${getDayLabel(ymd)})`,
-                평균집중률: Math.round(rates.reduce((a, b) => a + b, 0) / rates.length * 10) / 10,
-                최대집중률: Math.round(Math.max(...rates) * 10) / 10,
-            }));
+        return items
+            .map((item) => ({
+                label: `${item.baseYmd.slice(4, 6)}/${item.baseYmd.slice(6, 8)}`,
+                집중률: Math.round(Number(item.cnctrRate) * 10) / 10,
+                _ymd: item.baseYmd,
+            }))
+            .sort((a, b) => a._ymd.localeCompare(b._ymd));
     }, [items]);
 
-    // 바 차트용 상위 10개 관광지
-    const top10 = useMemo(() => {
-        return attractionAvg.slice(0, 10).map((a) => ({
-            관광지: a.name.length > 8 ? a.name.slice(0, 8) + "…" : a.name,
-            평균집중률: Math.round(a.avg * 10) / 10,
-        }));
-    }, [attractionAvg]);
-
-    // 요약 통계
+    // 요약 통계 (선택된 관광지 기준)
     const summary = useMemo(() => {
         if (items.length === 0) return null;
         const rates = items.map((i) => Number(i.cnctrRate));
@@ -288,7 +278,7 @@ export default function ConcentrationTesterPage() {
         const max = Math.max(...rates);
         const min = Math.min(...rates);
         const maxItem = items.find((i) => Number(i.cnctrRate) === max);
-        return { avg, max, min, maxItem, attractionCount: attractions.length };
+        return { avg, max, min, maxItem, attractionCount: attractions.length, days: items.length };
     }, [items, attractions]);
 
     // 테이블 데이터
@@ -320,7 +310,7 @@ export default function ConcentrationTesterPage() {
 
                 {/* 검색 폼 */}
                 <MayoCard variant="outlined" padding="md" title="조건 선택">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
                         <MayoSelect
                             label="시도"
                             size="md"
@@ -329,6 +319,8 @@ export default function ConcentrationTesterPage() {
                             onChange={(e) => {
                                 setAreaCd(e.target.value);
                                 setSignguCd("");
+                                setAllItems([]);
+                                setSelectedAttraction("");
                             }}
                             options={AREA_CODES.map((a) => ({
                                 value: a.code,
@@ -340,19 +332,16 @@ export default function ConcentrationTesterPage() {
                             size="md"
                             placeholder="시군구 선택"
                             value={signguCd}
-                            onChange={(e) => setSignguCd(e.target.value)}
+                            onChange={(e) => {
+                                setSignguCd(e.target.value);
+                                setAllItems([]);
+                                setSelectedAttraction("");
+                            }}
                             options={districts.map((d) => ({
                                 value: d.code,
                                 label: d.name,
                             }))}
                             disabled={!areaCd}
-                        />
-                        <MayoInput
-                            label="관광지명"
-                            size="md"
-                            placeholder="예: 경복궁"
-                            value={tAtsNm}
-                            onChange={(e) => setTAtsNm(e.target.value)}
                         />
                         <div className="flex items-end">
                             <MayoBtn
@@ -360,13 +349,30 @@ export default function ConcentrationTesterPage() {
                                 size="md"
                                 color="blue"
                                 onClick={handleSearch}
-                                disabled={loading || !areaCd || !signguCd || !tAtsNm.trim()}
+                                disabled={loading || !areaCd || !signguCd}
                                 className="w-full"
                             >
-                                {loading ? "조회 중..." : "조회"}
+                                {loading ? "불러오는 중..." : "관광지 불러오기"}
                             </MayoBtn>
                         </div>
                     </div>
+
+                    {/* 관광지 선택 (데이터 로드 후 표시) */}
+                    {attractions.length > 0 && (
+                        <div className="mt-4">
+                            <MayoSelect
+                                label={`관광지 선택 (${attractions.length}개)`}
+                                size="md"
+                                placeholder="관광지를 선택하세요"
+                                value={selectedAttraction}
+                                onChange={(e) => setSelectedAttraction(e.target.value)}
+                                options={attractions.map((name) => ({
+                                    value: name,
+                                    label: name,
+                                }))}
+                            />
+                        </div>
+                    )}
                 </MayoCard>
 
                 {/* 로딩 */}
@@ -384,23 +390,23 @@ export default function ConcentrationTesterPage() {
                 )}
 
                 {/* 결과 */}
-                {!loading && items.length > 0 && summary && (
+                {!loading && selectedAttraction && items.length > 0 && summary && (
                     <div className="mt-6 space-y-6">
                         {/* 요약 카드 */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs text-[var(--mayo-text-muted)]">조회 지역</p>
+                                <p className="text-xs text-[var(--mayo-text-muted)]">관광지</p>
                                 <p className="text-lg font-bold text-[var(--mayo-text)]">
+                                    {selectedAttraction}
+                                </p>
+                                <p className="text-xs text-[var(--mayo-text-muted)]">
                                     {selectedAreaName} {selectedSignguName}
                                 </p>
                             </MayoCard>
                             <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs text-[var(--mayo-text-muted)]">관광지 수</p>
+                                <p className="text-xs text-[var(--mayo-text-muted)]">예측 기간</p>
                                 <p className="text-lg font-bold text-[var(--mayo-text)]">
-                                    {summary.attractionCount}개
-                                </p>
-                                <p className="text-xs text-[var(--mayo-text-muted)]">
-                                    총 {totalCount}건 데이터
+                                    {summary.days}일
                                 </p>
                             </MayoCard>
                             <MayoCard variant="outlined" padding="sm">
@@ -434,7 +440,7 @@ export default function ConcentrationTesterPage() {
                                 </div>
                                 {summary.maxItem && (
                                     <p className="text-xs text-[var(--mayo-text-muted)] mt-1">
-                                        {summary.maxItem.tAtsNm} ({formatDate(summary.maxItem.baseYmd)})
+                                        {formatDate(summary.maxItem.baseYmd)}
                                     </p>
                                 )}
                             </MayoCard>
@@ -448,17 +454,15 @@ export default function ConcentrationTesterPage() {
                             tabs={[
                                 {
                                     value: "chart",
-                                    label: "차트",
+                                    label: "일별 추이",
                                     children: (
-                                        <div className="space-y-6 pt-2">
-                                            {/* 일별 추이 라인 차트 */}
+                                        <div className="pt-2">
                                             <MayoCard variant="outlined" padding="md">
                                                 <MayoLineChart
-                                                    title="일별 집중률 추이"
+                                                    title={`${selectedAttraction} 일별 집중률 추이`}
                                                     data={dailyAvg}
                                                     series={[
-                                                        { key: "평균집중률", color: "#2e8af2", label: "평균 집중률" },
-                                                        { key: "최대집중률", color: "#ef4444", label: "최대 집중률" },
+                                                        { key: "집중률", color: "#2e8af2", label: "집중률" },
                                                     ]}
                                                     height={300}
                                                     showGrid
@@ -466,22 +470,6 @@ export default function ConcentrationTesterPage() {
                                                     showDots
                                                 />
                                             </MayoCard>
-
-                                            {/* 관광지별 평균 집중률 바 차트 */}
-                                            {top10.length > 0 && (
-                                                <MayoCard variant="outlined" padding="md">
-                                                    <MayoBarChart
-                                                        title="관광지별 평균 집중률 (상위 10개)"
-                                                        data={top10}
-                                                        series={[
-                                                            { key: "평균집중률", color: "#7c3aed", label: "평균 집중률" },
-                                                        ]}
-                                                        height={300}
-                                                        showGrid
-                                                        showLegend
-                                                    />
-                                                </MayoCard>
-                                            )}
                                         </div>
                                     ),
                                 },
