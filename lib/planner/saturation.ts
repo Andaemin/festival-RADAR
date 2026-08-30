@@ -14,6 +14,39 @@ const HIGH_THRESHOLD = 6;
 const MEDIUM_THRESHOLD = 3;
 
 /**
+ * 포화도에 셀 축제를 "최근 몇 개 연도에 등장한 것"으로 제한하는 창의 크기.
+ *
+ * 코퍼스는 2017~2026 누적 3,582건이라, 창이 없으면 **2017년에 한 번 나오고 사라진 축제까지
+ * 현재의 경쟁자로 센다.** 실측(서울/문화예술/10월): 62건 중 16건이 2017~2019년에만
+ * 등장하고 그 뒤 8년간 원장에 없다. 그런데 화면 문구는 "이미 62건 있습니다"라는 현재형이다.
+ *
+ * 창을 3개년으로 잡은 이유는 **원장에 결번이 흔하기 때문**이다. 2회 이상 등장한 축제의
+ * 27.9%가 등장 연도 사이에 구멍을 갖는다(화천산천어축제 2020~2022 결번, 광주비엔날레는
+ * 격년제). 1~2개년으로 좁히면 한 해 쉰 축제와 격년제 축제를 "없어졌다"고 잘못 판단한다.
+ * 3개년이면 격년 한 주기와 한 해 결번을 모두 흡수한다.
+ *
+ * 임계값 6건/3건은 코퍼스가 단일 연도(1,266건)였을 때 정해진 값이다. 창별 HIGH 판정률
+ * 실측은 이렇다 - 창 없음 18.9% / 4개년 11.5% / **3개년 8.7%** / 2개년 7.1% / 단일 연도 4.5%.
+ * 3개년이 임계값이 원래 겨냥한 분포에 가장 가깝다.
+ *
+ * **이 창은 포화도와 월별 분포에만 적용한다.** 화이트스페이스와 코호트 건수는
+ * "이런 형태가 성립하는가"를 묻는 것이라 오래된 사례도 근거로 유효하다.
+ */
+export const ACTIVE_WINDOW_YEARS = 3;
+
+/**
+ * 포화도에 셀 축제의 하한 연도. 코퍼스에서 직접 도출한다.
+ *
+ * 데이터셋 최신 연도를 인자로 받지 않고 레코드에서 구하는 이유는, 이 값이 코퍼스와
+ * 어긋나면 창이 조용히 빗나가기 때문이다(예: 2027년 데이터를 넣었는데 상수는 2026).
+ */
+export function activeSinceYear(all: PlannerRecord[]): number {
+    let latest = 0;
+    for (const r of all) if (r.lastSeenYear > latest) latest = r.lastSeenYear;
+    return latest - (ACTIVE_WINDOW_YEARS - 1);
+}
+
+/**
  * 전국 축제의 이 비율 미만이 열리는 달은 추천 후보에서 제외한다.
  *
  * 실측(2017~2026 코퍼스 3,485건): 1월 1.2% · 2월 1.3% · 10월 27.3%.
@@ -26,12 +59,15 @@ const MIN_NATIONAL_SHARE = 0.03;
 export function buildMonthDistribution(
     all: PlannerRecord[],
     region: Region,
-    festivalType: FestivalType
+    festivalType: FestivalType,
+    /** 이 연도 이후에 원장에 등장한 축제만 센다. activeSinceYear()로 구한다. */
+    activeSince: number
 ): MonthDistributionEntry[] {
     const entries: MonthDistributionEntry[] = [];
+    const live = all.filter((r) => r.lastSeenYear >= activeSince);
 
     for (let month = 1; month <= 12; month++) {
-        const inMonth = all.filter((r) => r.startMonth === month);
+        const inMonth = live.filter((r) => r.startMonth === month);
         entries.push({
             month,
             nationalCount: inMonth.length,
@@ -47,25 +83,31 @@ export function buildMonthDistribution(
 
 export function evaluateSaturation(
     distribution: MonthDistributionEntry[],
-    month: number
+    month: number,
+    /** 문구에 집계 범위를 밝히는 데 쓴다. buildMonthDistribution에 넘긴 값과 같아야 한다. */
+    activeSince: number
 ): SaturationWarning | null {
     const entry = distribution.find((d) => d.month === month);
     if (!entry) return null;
 
     const { regionCount, regionSameTypeCount } = entry;
 
+    // 집계 범위를 문장에 박아 둔다. "이미 N건 있습니다"라고만 쓰면 10년 누적을
+    // 기획연도의 경쟁 상황으로 읽게 된다.
+    const scope = `최근 ${ACTIVE_WINDOW_YEARS}개 연도(${activeSince}~${activeSince + ACTIVE_WINDOW_YEARS - 1}년) 기준`;
+
     let level: SaturationWarning["level"];
     let message: string;
 
     if (regionSameTypeCount >= HIGH_THRESHOLD) {
         level = "HIGH";
-        message = `${month}월에 같은 지역·같은 유형 축제가 이미 ${regionSameTypeCount}건 있습니다. 관객이 직접 겹치므로 시기를 옮기거나 소재를 확실히 차별화해야 합니다.`;
+        message = `${scope} ${month}월에 같은 지역·같은 유형 축제가 ${regionSameTypeCount}건 열렸습니다. 관객이 직접 겹치므로 시기를 옮기거나 소재를 확실히 차별화해야 합니다.`;
     } else if (regionSameTypeCount >= MEDIUM_THRESHOLD) {
         level = "MEDIUM";
-        message = `${month}월에 같은 지역·같은 유형 축제가 ${regionSameTypeCount}건 있습니다. 개최일이 겹치지 않는지 확인하세요.`;
+        message = `${scope} ${month}월에 같은 지역·같은 유형 축제가 ${regionSameTypeCount}건 열렸습니다. 개최일이 겹치지 않는지 확인하세요.`;
     } else {
         level = "LOW";
-        message = `${month}월은 같은 지역·같은 유형 축제가 ${regionSameTypeCount}건으로 비교적 여유롭습니다.`;
+        message = `${scope} ${month}월은 같은 지역·같은 유형 축제가 ${regionSameTypeCount}건으로 비교적 여유롭습니다.`;
     }
 
     return { month, competingCount: regionCount, sameTypeCompetingCount: regionSameTypeCount, level, message };

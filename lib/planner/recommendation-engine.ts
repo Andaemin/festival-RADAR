@@ -1,7 +1,7 @@
 import { FESTIVAL_TYPE_DISPLAY, FestivalType, REGION_DISPLAY, Region, VENUE_TYPE_DISPLAY, VenueType } from "@/lib/domain/enums";
 import { summarizeBudgetEfficiency } from "./budget-efficiency";
 import { toReferenceFestival } from "./reference";
-import { buildMonthDistribution, evaluateSaturation, findLeastSaturatedMonths } from "./saturation";
+import { activeSinceYear, buildMonthDistribution, evaluateSaturation, findLeastSaturatedMonths } from "./saturation";
 import { buildKeywordSeasonality, describeSeason, fitsMonth } from "./seasonality";
 import { ClimateNormals, describeMonthClimate } from "./climate-normals";
 import {
@@ -28,6 +28,11 @@ export interface EngineInput {
     request: PlanningRecommendationRequest;
     all: PlannerRecord[];
     /**
+     * 코퍼스가 포괄하는 연도 범위 [최소, 최대]. 카드 문구에 집계 범위를 밝히는 데만 쓴다.
+     * "이미 162건 있습니다"는 그 162건이 10년치라는 사실을 숨긴다.
+     */
+    datasetYearRange: [number, number];
+    /**
      * 기상청 30년 평년값. 시기 카드에 기후 경고를 덧붙이는 데만 쓴다.
      * 없으면 경고 문장이 빠질 뿐 추천은 그대로 나온다(./climate-normals.ts).
      */
@@ -44,7 +49,7 @@ export interface EngineOutput {
     warnings: string[];
 }
 
-export function generateRecommendations({ request, all, climate }: EngineInput): EngineOutput {
+export function generateRecommendations({ request, all, datasetYearRange, climate }: EngineInput): EngineOutput {
     const region = request.regionCode as Region;
     const festivalType = request.festivalType as FestivalType;
     const venueType = request.venueType as VenueType;
@@ -75,16 +80,23 @@ export function generateRecommendations({ request, all, climate }: EngineInput):
         );
     }
 
+    // 화이트스페이스는 "이런 형태가 성립하는가"를 묻는 것이라 코퍼스 전체를 본다.
+    // 포화도·월별 분포만 최근성 창으로 좁힌다(./saturation.ts의 ACTIVE_WINDOW_YEARS).
     const whitespace = analyzeWhitespace({ national: nationalSameType, region: regionSameType });
     // 소재의 제철. 시기 카드와 소재 카드가 어긋나지 않게 하는 데 쓴다(./seasonality.ts).
     const seasonality = buildKeywordSeasonality(all);
-    const monthDistribution = buildMonthDistribution(all, region, festivalType);
+    const activeSince = activeSinceYear(all);
+    const monthDistribution = buildMonthDistribution(all, region, festivalType, activeSince);
     const budgetEfficiency = summarizeBudgetEfficiency(
         regionSameType.length >= 8 ? regionSameType : nationalSameType
     );
 
     const targetMonth = request.startMonth ?? null;
-    const saturation = targetMonth ? evaluateSaturation(monthDistribution, targetMonth) : null;
+    const saturation = targetMonth ? evaluateSaturation(monthDistribution, targetMonth, activeSince) : null;
+    /** 코호트 건수 문구에 붙이는 집계 범위. 포화도의 3개년 창과 혼동되지 않게 항상 밝힌다. */
+    const corpusScope = `${datasetYearRange[0]}~${datasetYearRange[1]}년`;
+    /** 포화도·시기 카드가 쓰는 최근성 창. */
+    const activeScope = `최근 ${datasetYearRange[1] - activeSince + 1}개 연도(${activeSince}~${datasetYearRange[1]}년)`;
 
     const recommendations: Recommendation[] = [];
 
@@ -100,11 +112,11 @@ export function generateRecommendations({ request, all, climate }: EngineInput):
             id: `venue-${venueCandidate.value}`,
             kind: "VENUE_SHIFT",
             title: `장소를 ${venueCandidate.label}으로 바꿔보세요`,
-            summary: `전국 ${typeLabel} 축제 중 ${venueCandidate.nationalCount}건이 ${venueCandidate.label} 장소에서 열리지만, ${regionLabel}의 ${typeLabel} 축제 중에는 ${venueCandidate.regionCount}건뿐입니다.`,
+            summary: `${corpusScope} 전국 ${typeLabel} 축제 중 ${venueCandidate.nationalCount}건이 ${venueCandidate.label} 장소에서 열렸지만, ${regionLabel}의 ${typeLabel} 축제 중에는 ${venueCandidate.regionCount}건뿐입니다.`,
             rationale: [
-                `선택하신 장소는 ${VENUE_TYPE_DISPLAY[venueType] ?? venueType}이고, ${regionLabel} 내 같은 유형·같은 장소 축제가 이미 ${cohort.regionSameTypeSameVenue}건 있습니다.`,
+                `선택하신 장소는 ${VENUE_TYPE_DISPLAY[venueType] ?? venueType}이고, ${corpusScope} ${regionLabel}에서 같은 유형·같은 장소로 열린 축제가 ${cohort.regionSameTypeSameVenue}건입니다.`,
                 `${venueCandidate.label}은 전국 사례 ${venueCandidate.nationalCount}건으로 성립 가능성이 확인된 형태입니다.`,
-                `${regionLabel} 내 ${typeLabel} 축제 ${cohort.regionSameType}건 중 ${venueCandidate.regionCount}건만 이 장소를 씁니다.`,
+                `${corpusScope} ${regionLabel} ${typeLabel} 축제 ${cohort.regionSameType}건 중 ${venueCandidate.regionCount}건만 이 장소를 씁니다.`,
             ],
             opportunityScore: pct(venueCandidate.opportunityScore),
             referenceFestivals: proof.map(toReferenceFestival),
@@ -121,7 +133,7 @@ export function generateRecommendations({ request, all, climate }: EngineInput):
             .slice(0, REFERENCE_LIMIT);
 
         const currentText = targetMonth
-            ? `희망하신 ${targetMonth}월은 ${regionLabel} 동일 유형 ${
+            ? `희망하신 ${targetMonth}월은 ${activeScope} 기준 ${regionLabel} 동일 유형 ${
                   monthDistribution.find((d) => d.month === targetMonth)?.regionSameTypeCount ?? 0
               }건입니다.`
             : `개최월을 아직 정하지 않으셨습니다.`;
@@ -130,12 +142,12 @@ export function generateRecommendations({ request, all, climate }: EngineInput):
             id: `timing-${quiet.month}`,
             kind: "TIMING_SHIFT",
             title: `${quiet.month}월 개최를 검토하세요`,
-            summary: `${quiet.month}월은 전국 축제의 ${(quiet.nationalShare * 100).toFixed(1)}%가 열리는 시기인데, ${regionLabel}의 ${typeLabel} 축제는 ${quiet.regionSameTypeCount}건뿐입니다. 전국 계절 흐름대로라면 ${Math.round(quiet.expectedCount)}건쯤 있었을 자리입니다.`,
+            summary: `${activeScope} 기준으로 ${quiet.month}월은 전국 축제의 ${(quiet.nationalShare * 100).toFixed(1)}%가 열리는 시기인데, ${regionLabel}의 ${typeLabel} 축제는 ${quiet.regionSameTypeCount}건뿐입니다. 전국 계절 흐름대로라면 ${Math.round(quiet.expectedCount)}건쯤 있었을 자리입니다.`,
             rationale: [
                 currentText,
-                `${quiet.month}월 ${regionLabel} 전체 축제는 ${quiet.regionCount}건, 그중 ${typeLabel}은 ${quiet.regionSameTypeCount}건입니다.`,
+                `${activeScope} ${quiet.month}월 ${regionLabel} 전체 축제는 ${quiet.regionCount}건, 그중 ${typeLabel}은 ${quiet.regionSameTypeCount}건입니다.`,
                 // 절대 건수가 아니라 전국 계절성 대비로 고른 달이다(./saturation.ts).
-                `전국 ${quiet.month}월 개최 축제 ${quiet.nationalCount}건(전체의 ${(quiet.nationalShare * 100).toFixed(1)}%)으로 성립하는 시기이며, ${regionLabel}은 기대치 ${Math.round(quiet.expectedCount)}건보다 ${Math.abs(Math.round(quiet.surplus))}건 적습니다.`,
+                `${activeScope} 전국 ${quiet.month}월 개최 축제 ${quiet.nationalCount}건(전체의 ${(quiet.nationalShare * 100).toFixed(1)}%)으로 성립하는 시기이며, ${regionLabel}은 기대치 ${Math.round(quiet.expectedCount)}건보다 ${Math.abs(Math.round(quiet.surplus))}건 적습니다.`,
                 // 기후 경고. 특이사항이 없는 달이면 문장이 붙지 않는다.
                 ...(climate
                     ? [describeMonthClimate(climate, region, quiet.month)].filter((x): x is string => x !== null)
@@ -161,8 +173,13 @@ export function generateRecommendations({ request, all, climate }: EngineInput):
         for (const r of inRegion) {
             for (const k of r.keywords) localCounts.set(k, (localCounts.get(k) ?? 0) + 1);
         }
+        // 들여올 소재와 **똑같이** 제철을 본다. 이 검사가 importedKeyword에만 걸려 있던
+        // 동안 "벚꽃 × 전어를 9월에" 같은 제목이 나갔다(스윕 1,020장 중 300장, 29.4%).
+        // 엔진이 벚꽃의 제철(3·4·5월, 101건 중 99%)을 이미 계산해 두고도 쓰던 것이다.
+        // fitsMonth는 제철을 모르는 소재를 통과시키므로 과잉 차단이 되지 않는다.
         const localKeyword = [...localCounts.entries()]
             .filter(([k]) => k !== importedKeyword.value)
+            .filter(([k]) => fitsMonth(seasonality, k, plannedMonth))
             .sort((a, b) => b[1] - a[1])[0];
 
         const proof = nationalSameType
@@ -182,13 +199,17 @@ export function generateRecommendations({ request, all, climate }: EngineInput):
                 ? `"${importedKeyword.value}"은 전국 ${typeLabel} 축제 ${importedKeyword.nationalCount}건에서 쓰이지만 ${regionLabel} ${typeLabel} 축제에는 한 건도 없습니다. ${regionLabel}에서 가장 많이 쓰인 소재 "${localKeyword[0]}"(${localKeyword[1]}건)과 결합하면 지역성과 새로움을 동시에 잡을 수 있습니다.`
                 : `"${importedKeyword.value}"은 전국 ${typeLabel} 축제 ${importedKeyword.nationalCount}건에서 쓰이지만 ${regionLabel}에는 사례가 없습니다.`,
             rationale: [
-                `축제명 ${cohort.nationalSameType}건을 분석해 추출한 소재 태그 기준입니다.`,
+                `${corpusScope} 축제명 ${cohort.nationalSameType}건을 분석해 추출한 소재 태그 기준입니다.`,
                 `"${importedKeyword.value}" 전국 사용 ${importedKeyword.nationalCount}건 / ${regionLabel} 사용 ${importedKeyword.regionCount}건.`,
                 ...(localKeyword
                     ? [`"${localKeyword[0]}"은 ${regionLabel} 축제 ${localKeyword[1]}건에서 이미 검증된 지역 소재입니다.`]
                     : []),
                 // 제철이 확인된 소재만 문장이 붙는다. LLM이 시기를 잘못 잡는 것을 막는다.
-                ...[describeSeason(seasonality, importedKeyword.value)].filter((x): x is string => x !== null),
+                // 두 소재 모두 붙인다 - 제목에 나가는 소재는 둘 다이므로 근거도 둘 다 있어야 한다.
+                ...[
+                    describeSeason(seasonality, importedKeyword.value),
+                    localKeyword ? describeSeason(seasonality, localKeyword[0]) : null,
+                ].filter((x): x is string => x !== null),
             ],
             opportunityScore: pct(importedKeyword.opportunityScore),
             referenceFestivals: proof.map(toReferenceFestival),

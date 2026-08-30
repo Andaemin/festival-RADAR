@@ -85,6 +85,7 @@ export async function POST(request: NextRequest) {
         const engine = generateRecommendations({
             request: body,
             all: corpus.records,
+            datasetYearRange: corpus.datasetYearRange,
             climate: loadClimateNormals(),
         });
 
