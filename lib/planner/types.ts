@@ -15,6 +15,15 @@ export interface PlannerRecord {
     durationDays: number | null;
     totalBudgetKrw: number | null;
     visitors: number | null;
+    /**
+     * 이 축제가 원장에 마지막으로 등장한 연도.
+     *
+     * 코퍼스는 2017~2026 누적이라 "이 축제가 지금도 열리는가"와 "이런 축제가 있었는가"가
+     * 섞여 있다. 포화도는 앞의 질문이라 이 값으로 최근 것만 센다(./saturation.ts).
+     * 화이트스페이스는 뒤의 질문이므로 이 값을 보지 않는다 - 2019년 사례도 "성립 가능성"의
+     * 근거로는 그대로 유효하다.
+     */
+    lastSeenYear: number;
     /** 축제명에서 추출한 소재 토큰. keyword-mining이 채운다. */
     keywords: string[];
 }
