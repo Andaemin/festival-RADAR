@@ -4,14 +4,19 @@ import { useEffect, useState } from "react";
 import type { MetadataResponse } from "@/lib/domain/types";
 import { FALLBACK_LEVEL_LABEL, FallbackLevel, FESTIVAL_TYPE_DISPLAY, REGION_DISPLAY, VENUE_TYPE_DISPLAY } from "@/lib/domain/enums";
 import {
+    DataQualityAuditResponse,
     estimateMultiYearBudget,
+    fetchDataQualityAudit,
+    fetchReliabilityAudit,
     MultiYearBudgetEstimateResponse,
     MultiYearPredictionCandidateDto,
+    ReliabilityAuditResponse,
     searchMultiYearSeries,
 } from "@/lib/api/multiyear-budget-estimates";
 import { resolveSeriesDisplayState, SERIES_FALLBACK_MESSAGE } from "@/lib/multiyear-series/planning-ui-display";
 import { buildSeriesSearchResultKey, type SeriesSearchResult } from "@/lib/multiyear-series/series-search";
 import type { SeriesHistoryDetailDto, SeriesHistoryExclusionReason } from "@/lib/multiyear-series/series-history-detail";
+import type { DataQualityAuditReason, DataQualityAuditSeverity, SeriesDataQualityAuditRecord } from "@/lib/multiyear-series/data-quality-audit";
 import { quantile } from "@/lib/utils/weighted-statistics";
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -736,6 +741,12 @@ export default function AssistantTesterPage() {
                         </div>
                     )}
                     {result && <ResultPane result={result} requestedDurationDays={submittedDurationDays} />}
+
+                    {/* 17/18절 — 특정 estimate 결과와 무관하게 항상 표시(전체 데이터 품질 감사). */}
+                    <GlobalDataQualityAuditSection />
+
+                    {/* G0 이후 Reliability Revalidation — 특정 estimate 결과와 무관하게 항상 표시. */}
+                    <GlobalReliabilityAuditSection />
                 </section>
             </div>
         </main>
@@ -844,6 +855,9 @@ function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudget
             {seriesDisplay.kind === "SERIES_APPLIED" && result.seriesHistoryDetail && (
                 <SeriesHistoryDetailCard detail={result.seriesHistoryDetail} result={result} />
             )}
+
+            {/* Future-Year Safety 진단 — Data Quality/Reliability와는 별개 축(20절). */}
+            {seriesDisplay.kind === "SERIES_APPLIED" && <FutureYearSafetyCard result={result} />}
             {(seriesDisplay.kind === "UNMATCHED" || seriesDisplay.kind === "AMBIGUOUS" || seriesDisplay.kind === "NO_VALID_HISTORY") && (
                 <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
                     ℹ️ {SERIES_FALLBACK_MESSAGE[seriesDisplay.kind]}
@@ -1036,6 +1050,38 @@ function ReliabilityCard({ result }: { result: MultiYearBudgetEstimateResponse }
                 />
             </div>
 
+            {/* READ-ONLY DIAGNOSTIC(G0 이후 Reliability Revalidation) — reasonKey/historical
+                dispersion/threshold를 그대로 노출한다. tier 판정식 자체를 여기서 재계산하지 않는다 -
+                전부 API가 이미 계산한 값이다. */}
+            {result.reliabilityDiagnostic && (
+                <div className="border-t mt-3 pt-3">
+                    <p className="text-[11px] font-semibold text-gray-400 mb-1.5">Reliability 진단 (G0 이후 재검증, tester 전용)</p>
+                    <FieldGrid
+                        rows={[
+                            ["reasonKey", <code key="rk">{result.reliabilityDiagnostic.reasonKey}</code>],
+                            [
+                                "Historical dispersion",
+                                result.reliabilityDiagnostic.historicalDispersion !== null
+                                    ? `log(P75/P25) = ${result.reliabilityDiagnostic.historicalDispersion.toFixed(4)}`
+                                    : "— (historyCount<2, 측정 불가)",
+                            ],
+                            [
+                                "Calibration threshold",
+                                result.reliabilityDiagnostic.volatilityThreshold !== null
+                                    ? result.reliabilityDiagnostic.volatilityThreshold.toFixed(4)
+                                    : "— (calibration pool 부족)",
+                            ],
+                            ["estimateSource", result.seriesSignal.estimateSource ?? "—"],
+                            ["latestHistoricalGap", result.seriesSignal.latestHistoricalGap !== undefined ? `${result.seriesSignal.latestHistoricalGap}년` : "—"],
+                        ]}
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1.5">
+                        G0 이후 backtest 연구 결과: HIGH/MEDIUM의 정확도(MdAPE) 차이는 작아졌지만, historical dispersion(변동성)
+                        자체는 여전히 뚜렷하게 구분됩니다 — 신뢰도는 정확도 등급이 아니라 과거 데이터 근거의 안정성 지표입니다.
+                    </p>
+                </div>
+            )}
+
             <p className="text-[11px] text-gray-400 mt-3 italic">
                 ⓘ 신뢰도는 &lsquo;이 예산이 맞을 확률&rsquo;이 아니라, 이 추정에 사용한 데이터 근거의 강도를 나타냅니다. 숫자 % confidence로 환산되는 값이 아닙니다.
             </p>
@@ -1088,6 +1134,69 @@ const ESTIMATE_SOURCE_LABEL: Record<"LATEST" | "MEDIAN", string> = {
 };
 
 /**
+ * READ-ONLY DIAGNOSTIC(Series Data Quality Audit) 표시 라벨 — 24절 원칙: "잘못된 데이터"/"오류
+ * 데이터"/"사용 불가" 같은 확정적 표현을 쓰지 않는다. severity는 검토 우선순위일 뿐 오류 확정이
+ * 아니다("REVIEW_REQUIRED" != "DATA_ERROR_CONFIRMED").
+ */
+const AUDIT_SEVERITY_LABEL: Record<DataQualityAuditSeverity, string> = {
+    NONE: "추가 검토 신호 없음",
+    INFO: "참고",
+    MEDIUM: "검토 필요",
+    HIGH: "검토 필요(우선)",
+};
+const AUDIT_SEVERITY_BADGE_CLASS: Record<DataQualityAuditSeverity, string> = {
+    NONE: "bg-gray-100 text-gray-500",
+    INFO: "bg-sky-100 text-sky-700",
+    MEDIUM: "bg-amber-100 text-amber-700",
+    HIGH: "bg-rose-100 text-rose-700",
+};
+const AUDIT_REASON_LABEL: Record<DataQualityAuditReason, string> = {
+    COMPONENT_SUM_MISMATCH: "구성 합계 확인 필요",
+    YEAR_OVER_YEAR_SCALE_JUMP: "전년 대비 급격한 규모 변화",
+    SERIES_PRIOR_MEDIAN_DEVIATION: "과거 중앙값 대비 급격한 규모 변화",
+    DIGIT_SHIFT_PATTERN: "10배/100배 단위 변화 패턴과 유사",
+    ISOLATED_SPIKE_PATTERN: "전후 연도와 비교해 일시적 급변 패턴",
+};
+
+function AuditSeverityBadge({ severity }: { severity: DataQualityAuditSeverity }) {
+    if (severity === "NONE") return <span className="text-gray-300">—</span>;
+    return (
+        <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap ${AUDIT_SEVERITY_BADGE_CLASS[severity]}`}>
+            {severity === "HIGH" && "⚠ "}
+            {AUDIT_SEVERITY_LABEL[severity]}
+        </span>
+    );
+}
+
+/** row 하나의 감사 상세 — "동일 축제 과거 이력" 표의 확장 셀, Top anomalies 표에서 공통으로 쓴다. */
+function AuditRecordDetail({ r }: { r: SeriesDataQualityAuditRecord }) {
+    return (
+        <div className="flex flex-col gap-0.5">
+            <AuditSeverityBadge severity={r.severity} />
+            {/* 8절 — 기존 flag(VALID)와 이 Series 문맥 진단을 혼동하지 않도록 나란히 보여준다.
+                (severity!=="NONE"인 record는 own-history eligibility를 이미 통과했으므로
+                budgetQualityFlag는 항상 "VALID"다 - 그 자체가 이 기능의 핵심 메시지.) */}
+            {r.severity !== "NONE" && r.budgetQualityFlag && (
+                <span className="text-[10px] text-gray-400">기존 데이터 품질 flag: {r.budgetQualityFlag}</span>
+            )}
+            {r.reasons.length > 0 && (
+                <ul className="text-[10px] text-gray-500 leading-tight">
+                    {r.reasons.map((reason) => (
+                        <li key={reason}>
+                            · {AUDIT_REASON_LABEL[reason]}
+                            {reason === "YEAR_OVER_YEAR_SCALE_JUMP" && r.yearOverYearRatio !== null && ` (전년 대비 ${r.yearOverYearRatio.toFixed(1)}배)`}
+                            {reason === "SERIES_PRIOR_MEDIAN_DEVIATION" && r.priorMedianRatio !== null && ` (중앙값 대비 ${r.priorMedianRatio.toFixed(1)}배)`}
+                            {reason === "COMPONENT_SUM_MISMATCH" && r.componentMismatchRatio !== null && ` (${r.componentMismatchRatio.toFixed(1)}배 차이)`}
+                            {reason === "DIGIT_SHIFT_PATTERN" && r.suspectedDigitShiftFactor !== null && ` (약 ${r.suspectedDigitShiftFactor}배)`}
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+/**
  * "동일 축제 과거 이력" — Series 계산(computeOwnHistorySignal)에 실제로 쓰인 개별 historical
  * record를 표로 풀어 보여준다(표시 전용, 계산은 전혀 다시 하지 않는다). API가 이미 leakage-safe
  * 필터/CPI all-or-nothing 규칙을 적용해 내려준 값을 그대로 렌더링만 한다.
@@ -1117,6 +1226,18 @@ function SeriesHistoryDetailCard({ detail, result }: { detail: SeriesHistoryDeta
                 : Math.round(quantile(pointEstimateValues, 0.5));
     const estimateMatchesApi = computedEstimate !== null && computedEstimate === result.estimatedBudgetKrw;
 
+    // READ-ONLY DIAGNOSTIC(Series Data Quality Audit) — datasetYear+festivalName으로 join한다.
+    // seriesDataQualityAudit.records는 own-history eligibility를 통과한 record만 담고 있으므로
+    // (excluded record는 애초에 감사 대상이 아니다) 제외된 행은 조회되지 않는 게 정상이다.
+    const auditByKey = new Map<string, SeriesDataQualityAuditRecord>();
+    for (const r of result.seriesDataQualityAudit?.records ?? []) {
+        auditByKey.set(`${r.datasetYear}::${r.festivalName}`, r);
+    }
+    const audit = result.seriesDataQualityAudit;
+    const pointEstimateAuditRows = pointEstimateRecords
+        .map((r) => auditByKey.get(`${r.datasetYear}::${r.festivalName}`))
+        .filter((r): r is SeriesDataQualityAuditRecord => r !== undefined && r.severity !== "NONE");
+
     return (
         <Card title="동일 축제 과거 이력">
             <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 mb-3">
@@ -1124,6 +1245,34 @@ function SeriesHistoryDetailCard({ detail, result }: { detail: SeriesHistoryDeta
                 {" · "}최근 이력: {detail.latestHistoricalYear}년{" · "}계획연도와 차이: {detail.latestHistoricalGap}년
                 {detail.estimateSource === "MEDIAN" && <span className="text-emerald-700"> — 최근 이력이 3년 이상 오래되어 중앙값을 사용했습니다.</span>}
             </div>
+
+            {/* 15/16절 — 데이터 품질 진단 요약. severity는 오류 확정이 아니라 검토 우선순위다. */}
+            {audit && (
+                <div className="p-2.5 bg-white border border-gray-200 rounded-lg text-xs mb-3">
+                    <p className="font-semibold text-gray-700 mb-1.5">데이터 품질 진단</p>
+                    {audit.reviewRequiredCount === 0 ? (
+                        <p className="text-gray-500">추가 검토 신호 없음</p>
+                    ) : (
+                        <p className="text-gray-600">
+                            검토 필요 record: <span className="font-semibold">{audit.reviewRequiredCount} / {audit.recordCount}</span>
+                            {" · "}HIGH: {audit.highCount}{" · "}MEDIUM: {audit.mediumCount}{" · "}참고: {audit.infoCount}
+                        </p>
+                    )}
+                    {pointEstimateAuditRows.length > 0 && (
+                        <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-amber-800">
+                            ⚠ 예상 예산 기준값에 데이터 검토 신호가 있습니다:
+                            {pointEstimateAuditRows.map((r) => (
+                                <div key={r.recordId} className="mt-1">
+                                    <span className="font-semibold">{r.datasetYear}년</span> <AuditSeverityBadge severity={r.severity} />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <p className="text-[10px] text-gray-400 mt-1.5">
+                        데이터 품질 진단은 오류 확정이 아니라 검토 우선순위입니다. 표시된 값은 자동 수정되거나 예산 계산에서 제외되지 않습니다.
+                    </p>
+                </div>
+            )}
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                 <MiniStat label="확인된 과거 이력" value={`${detail.displayedRecordCount}회`} />
@@ -1157,10 +1306,13 @@ function SeriesHistoryDetailCard({ detail, result }: { detail: SeriesHistoryDeta
                             <th className="text-right px-2 py-1.5 border-b">당시 계획예산</th>
                             <th className="text-right px-2 py-1.5 border-b">CPI 보정 예산</th>
                             <th className="text-left px-2 py-1.5 border-b">계산 사용 여부</th>
+                            <th className="text-left px-2 py-1.5 border-b">데이터 품질</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {detail.records.map((r, i) => (
+                        {detail.records.map((r, i) => {
+                            const auditRow = auditByKey.get(`${r.datasetYear}::${r.festivalName}`);
+                            return (
                             <tr
                                 key={i}
                                 className={`border-b last:border-0 ${
@@ -1190,8 +1342,12 @@ function SeriesHistoryDetailCard({ detail, result }: { detail: SeriesHistoryDeta
                                         <span className="text-gray-500">제외 ({EXCLUSION_REASON_LABEL[r.exclusionReason!]})</span>
                                     )}
                                 </td>
+                                <td className="px-2 py-1.5">
+                                    {auditRow ? <AuditRecordDetail r={auditRow} /> : <span className="text-gray-300">—</span>}
+                                </td>
                             </tr>
-                        ))}
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -1222,6 +1378,46 @@ function SeriesHistoryDetailCard({ detail, result }: { detail: SeriesHistoryDeta
                     <div className="text-gray-400 mt-1">추천 계획 예산(× 1.05) 검산은 위 &ldquo;추천 공식 검증&rdquo; 카드를 참고하세요.</div>
                 </div>
             </div>
+        </Card>
+    );
+}
+
+/**
+ * PHASE — Final Production Benchmark & Future-Year Safety(20절). "예산 추정 / Data Quality /
+ * Reliability / Future-year safety"는 서로 다른 축이다 - 이 카드는 그중 Future-year safety만
+ * 담당한다(계획연도가 보유 데이터보다 미래일 때 G0/CPI가 어떤 근거로 계산됐는지 보여줄 뿐, 새
+ * 계산을 하지 않는다 - 전부 API가 이미 계산한 seriesSignal/seriesHistoryDetail 값 그대로).
+ */
+function FutureYearSafetyCard({ result }: { result: MultiYearBudgetEstimateResponse }) {
+    const signal = result.seriesSignal;
+    if (signal.status !== "MATCHED" || signal.latestHistoricalYear === undefined || signal.latestHistoricalGap === undefined || signal.estimateSource === undefined) {
+        return null;
+    }
+    const cpiFullyAvailable = result.seriesHistoryDetail?.cpiFullyAvailable ?? null;
+
+    return (
+        <Card title="Future-year 진단">
+            <FieldGrid
+                rows={[
+                    ["계획연도", `${result.planningYear}년`],
+                    ["최신 동일 축제 이력", `${signal.latestHistoricalYear}년`],
+                    ["차이(gap)", `${signal.latestHistoricalGap}년`],
+                    ["추정 기준", ESTIMATE_SOURCE_LABEL[signal.estimateSource]],
+                    [
+                        "CPI 적용",
+                        cpiFullyAvailable === null
+                            ? "—"
+                            : cpiFullyAvailable
+                                ? "CPI 보정 적용"
+                                : "미래/미지원 연도라 CPI 보정 없이 명목(nominal) 예산 기준",
+                    ],
+                ]}
+            />
+            <p className="text-[10px] text-gray-400 mt-2">
+                이 카드는 Data Quality(source value 검토 신호)·Reliability(과거 데이터 근거의 안정성)와는 별개 축입니다 —
+                &ldquo;audit HIGH&rdquo;와 &ldquo;reliability LOW&rdquo;와 &ldquo;future fallback(명목 예산 사용)&rdquo;은 서로
+                다른 의미이며 자동으로 연결되지 않습니다.
+            </p>
         </Card>
     );
 }
@@ -1447,5 +1643,257 @@ function CandidatesCard({
                 </p>
             </details>
         </Card>
+    );
+}
+
+const AUDIT_SEVERITY_TAB_OPTIONS: { value: DataQualityAuditSeverity | "ALL"; label: string }[] = [
+    { value: "ALL", label: "전체" },
+    { value: "HIGH", label: "HIGH" },
+    { value: "MEDIUM", label: "MEDIUM" },
+    { value: "INFO", label: "참고" },
+];
+
+/**
+ * 17/18절 — "전체 데이터 품질 감사"(READ-ONLY DIAGNOSTIC). 특정 estimate 결과와 무관하게 항상
+ * 표시된다(어떤 series-linked VALID record가 review 우선순위가 높은지, 보유 데이터 전체 기준).
+ * `GET /api/v1/data-quality-audit`을 처음 펼쳤을 때만 호출한다(페이지 로드마다 자동 호출하지
+ * 않음 - production 사용자 플로우가 아니라 내부 tester 전용).
+ */
+function GlobalDataQualityAuditSection() {
+    const [opened, setOpened] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [data, setData] = useState<DataQualityAuditResponse | null>(null);
+    const [severity, setSeverity] = useState<DataQualityAuditSeverity | "ALL">("ALL");
+    const [reason, setReason] = useState<DataQualityAuditReason | "ALL">("ALL");
+    const [q, setQ] = useState("");
+
+    useEffect(() => {
+        if (!opened) return;
+        let cancelled = false;
+        // 기존 seriesSearchText 검색 effect(위 234줄)와 동일 패턴 — setState를 effect 본문에서
+        // 바로 부르지 않고 debounce 콜백 안에서 부른다(cascading render 방지 + q 자유입력 debounce).
+        const timer = setTimeout(() => {
+            setLoading(true);
+            setError(null);
+            fetchDataQualityAudit({
+                severity,
+                reason: reason === "ALL" ? undefined : reason,
+                q: q.trim() || undefined,
+                limit: 50,
+            })
+                .then((res) => {
+                    if (!cancelled) setData(res);
+                })
+                .catch((err) => {
+                    if (!cancelled) setError(err instanceof Error ? err.message : "데이터 품질 감사 조회에 실패했습니다.");
+                })
+                .finally(() => {
+                    if (!cancelled) setLoading(false);
+                });
+        }, SEARCH_DEBOUNCE_MS);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [opened, severity, reason, q]);
+
+    return (
+        <details className="bg-white rounded-xl shadow p-4 text-xs" onToggle={(e) => setOpened(e.currentTarget.open)}>
+            <summary className="cursor-pointer text-gray-600 font-medium">전체 데이터 품질 감사(Series Data Quality Audit)</summary>
+            <div className="mt-3 flex flex-col gap-3">
+                <p className="text-[11px] text-gray-500">
+                    데이터 품질 진단은 오류 확정이 아니라 검토 우선순위입니다. 표시된 값은 자동 수정되거나 예산 계산에서 제외되지 않습니다.
+                </p>
+
+                {opened && loading && !data && <p className="text-gray-400">불러오는 중...</p>}
+                {error && <p className="text-red-600">{error}</p>}
+
+                {data && (
+                    <>
+                        <p className="text-[10px] text-gray-400">
+                            대상 범위: {data.auditScope.description} ({data.auditScope.earliestDatasetYear}~{data.auditScope.latestDatasetYear})
+                        </p>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <MiniStat label="감사 대상" value={`${data.summary.auditPoolRecordCount.toLocaleString()}건`} />
+                            <MiniStat
+                                label="검토 필요"
+                                value={`${data.summary.reviewRequiredCount.toLocaleString()}건 (${((data.summary.reviewRequiredCount / data.summary.auditPoolRecordCount) * 100).toFixed(1)}%)`}
+                            />
+                            <MiniStat label="HIGH" value={`${data.summary.highCount.toLocaleString()}건`} />
+                            <MiniStat label="MEDIUM" value={`${data.summary.mediumCount.toLocaleString()}건`} />
+                            <MiniStat label="연도간 변화 ≥10배" value={`${data.summary.yearlyChangeAtLeast10xCount.toLocaleString()}건`} />
+                            <MiniStat label="≥20배" value={`${data.summary.yearlyChangeAtLeast20xCount.toLocaleString()}건`} />
+                            <MiniStat label="≥100배" value={`${data.summary.yearlyChangeAtLeast100xCount.toLocaleString()}건`} />
+                            <MiniStat label="구성 합계 불일치" value={`${data.summary.componentMismatchCount.toLocaleString()}건`} />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-100">
+                            <div className="flex gap-1">
+                                {AUDIT_SEVERITY_TAB_OPTIONS.map((opt) => (
+                                    <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => setSeverity(opt.value)}
+                                        className={`px-2 py-1 rounded text-[11px] ${severity === opt.value ? "bg-emerald-600 text-white" : "bg-gray-100 text-gray-600"}`}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <select
+                                className="border rounded px-2 py-1 text-[11px]"
+                                value={reason}
+                                onChange={(e) => setReason(e.target.value as DataQualityAuditReason | "ALL")}
+                            >
+                                <option value="ALL">reason 전체</option>
+                                {(Object.keys(AUDIT_REASON_LABEL) as DataQualityAuditReason[]).map((r) => (
+                                    <option key={r} value={r}>{AUDIT_REASON_LABEL[r]}</option>
+                                ))}
+                            </select>
+                            <input
+                                type="text"
+                                placeholder="축제명 검색"
+                                className="border rounded px-2 py-1 text-[11px] flex-1 min-w-[8rem]"
+                                value={q}
+                                onChange={(e) => setQ(e.target.value)}
+                            />
+                        </div>
+
+                        <p className="text-[10px] text-gray-400">
+                            {data.matchedCount.toLocaleString()}건 중 {data.returnedCount.toLocaleString()}건 표시(HIGH 먼저 → 변화 비율 큰 순 → 연도 → 축제명)
+                        </p>
+
+                        <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                            <table className="w-full text-[11px] border-collapse">
+                                <thead className="sticky top-0 bg-white">
+                                    <tr className="bg-gray-50">
+                                        <th className="text-left px-2 py-1.5 border-b">축제</th>
+                                        <th className="text-left px-2 py-1.5 border-b">연도</th>
+                                        <th className="text-right px-2 py-1.5 border-b">예산</th>
+                                        <th className="text-right px-2 py-1.5 border-b">이전 예산</th>
+                                        <th className="text-left px-2 py-1.5 border-b">기존 flag</th>
+                                        <th className="text-left px-2 py-1.5 border-b">진단</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.anomalies.map((r) => (
+                                        <tr key={r.recordId} className="border-b last:border-0">
+                                            <td className="px-2 py-1.5">{r.canonicalSeriesName}</td>
+                                            <td className="px-2 py-1.5">{r.datasetYear}</td>
+                                            <td className="px-2 py-1.5 text-right">{r.budgetKrw !== null ? fmt(r.budgetKrw) : "—"}</td>
+                                            <td className="px-2 py-1.5 text-right">{r.previousBudgetKrw !== null ? fmt(r.previousBudgetKrw) : "—"}</td>
+                                            <td className="px-2 py-1.5 text-gray-400">{r.budgetQualityFlag ?? "—"}</td>
+                                            <td className="px-2 py-1.5"><AuditRecordDetail r={r} /></td>
+                                        </tr>
+                                    ))}
+                                    {data.anomalies.length === 0 && (
+                                        <tr>
+                                            <td colSpan={6} className="px-2 py-3 text-center text-gray-400">조건에 맞는 record가 없습니다.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </>
+                )}
+            </div>
+        </details>
+    );
+}
+
+/**
+ * G0 이후 Reliability Revalidation — READ-ONLY DIAGNOSTIC. leakage-safe 2024~2026 fold
+ * backtest(`/api/v1/reliability-audit`)의 사후 집계만 표시한다. production reliability
+ * tier/threshold를 이 화면에서 재계산하거나 바꾸지 않는다 - `GlobalDataQualityAuditSection`과
+ * 동일하게 처음 펼쳤을 때만 fetch한다.
+ */
+function GlobalReliabilityAuditSection() {
+    const [opened, setOpened] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [data, setData] = useState<ReliabilityAuditResponse | null>(null);
+
+    useEffect(() => {
+        if (!opened || data !== null) return; // 한 번 불러오면 재사용(backtest는 dataRevision 바뀌기 전까진 고정값).
+        let cancelled = false;
+        const timer = setTimeout(() => {
+            setLoading(true);
+            setError(null);
+            fetchReliabilityAudit()
+                .then((res) => {
+                    if (!cancelled) setData(res);
+                })
+                .catch((err) => {
+                    if (!cancelled) setError(err instanceof Error ? err.message : "Reliability 감사 조회에 실패했습니다.");
+                })
+                .finally(() => {
+                    if (!cancelled) setLoading(false);
+                });
+        }, 0);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [opened, data]);
+
+    const fmtPct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(2)}%`);
+    const fmtNum = (v: number | null) => (v === null ? "—" : v.toFixed(4));
+
+    return (
+        <details className="bg-white rounded-xl shadow p-4 text-xs" onToggle={(e) => setOpened(e.currentTarget.open)}>
+            <summary className="cursor-pointer text-gray-600 font-medium">전체 Reliability 감사(G0 이후 재검증, leakage-safe backtest)</summary>
+            <div className="mt-3 flex flex-col gap-3">
+                <p className="text-[11px] text-gray-500">
+                    신뢰도는 &lsquo;이 예산이 맞을 확률&rsquo;이 아니라, 이 추정에 사용한 동일 축제 과거 데이터 근거의 안정성/강도를 나타냅니다.
+                    이 backtest는 2024~2026 leakage-safe fold의 사후 집계이며 production reliability 판정식을 전혀 바꾸지 않습니다.
+                </p>
+
+                {opened && loading && !data && <p className="text-gray-400">불러오는 중...</p>}
+                {error && <p className="text-red-600">{error}</p>}
+
+                {data && (
+                    <>
+                        <p className="text-[10px] text-gray-400">fold: {data.summary.foldYears.join("/")} · Series n={data.summary.seriesN.toLocaleString()}</p>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-[11px] border-collapse">
+                                <thead>
+                                    <tr className="bg-gray-50">
+                                        <th className="text-left px-2 py-1.5 border-b">Tier</th>
+                                        <th className="text-right px-2 py-1.5 border-b">n</th>
+                                        <th className="text-right px-2 py-1.5 border-b">Estimate MdAPE</th>
+                                        <th className="text-right px-2 py-1.5 border-b">P90</th>
+                                        <th className="text-right px-2 py-1.5 border-b">P95</th>
+                                        <th className="text-right px-2 py-1.5 border-b">Recommendation MdAPE</th>
+                                        <th className="text-right px-2 py-1.5 border-b">historical dispersion median</th>
+                                        <th className="text-right px-2 py-1.5 border-b">single/multi history</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.summary.tiers.map((t) => (
+                                        <tr key={t.tier} className="border-b last:border-0">
+                                            <td className="px-2 py-1.5 font-semibold">{t.tier}</td>
+                                            <td className="px-2 py-1.5 text-right">{t.n.toLocaleString()}</td>
+                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.estimateMdApe)}</td>
+                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.estimateP90Ape)}</td>
+                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.estimateP95Ape)}</td>
+                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.recommendationMdApe)}</td>
+                                            <td className="px-2 py-1.5 text-right">{fmtNum(t.historicalDispersionMedian)}</td>
+                                            <td className="px-2 py-1.5 text-right">{t.singleHistoryCount}/{t.multiHistoryCount}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p className="text-[10px] text-gray-400">
+                            historical dispersion median은 HIGH/MEDIUM을 여전히 뚜렷하게 구분합니다(정확도 차이보다 훨씬 큼) —
+                            신뢰도는 정확도 등급이 아니라 데이터 근거의 안정성 지표라는 문구가 이 결과와 일치합니다.
+                        </p>
+                    </>
+                )}
+            </div>
+        </details>
     );
 }

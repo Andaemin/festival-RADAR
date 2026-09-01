@@ -1,9 +1,17 @@
 import { MultiYearBudgetEstimateRequest } from "@/lib/multiyear/planning-api-types";
 import type { EstimateBasis, RecommendationBasis, RangeBasis, DataQualityBasis } from "@/lib/multiyear-series/apply-planning-semantics";
-import type { PlanningReliabilityTier } from "@/lib/multiyear-series/reliability";
+import type { PlanningReliabilityReasonKey, PlanningReliabilityTier } from "@/lib/multiyear-series/reliability";
+import type { ReliabilityBacktestSummary } from "@/lib/multiyear-series/reliability-backtest";
 import type { SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
 import type { SeriesSearchResult } from "@/lib/multiyear-series/series-search";
 import type { SeriesHistoryDetailDto } from "@/lib/multiyear-series/series-history-detail";
+import type {
+    DataQualityAuditReason,
+    DataQualityAuditSeverity,
+    GlobalDataQualityAuditSummary,
+    SeriesDataQualityAuditRecord,
+    SeriesGroupDataQualitySummary,
+} from "@/lib/multiyear-series/data-quality-audit";
 
 export interface MultiYearYearWeightShareDto {
     year: number;
@@ -70,12 +78,26 @@ export interface MultiYearBudgetEstimateResponse {
     /** assistant-tester 진단용 — seriesSignal.status==="MATCHED"일 때만 채워진다(그 외 null).
      *  production 계산에는 관여하지 않는다(표시 전용). */
     seriesHistoryDetail: SeriesHistoryDetailDto | null;
+    /** READ-ONLY DIAGNOSTIC(Series Data Quality Audit) — seriesSignal.status==="MATCHED"일 때만
+     *  채워진다. severity/reasons는 "REVIEW_REQUIRED"를 뜻할 뿐 "DATA_ERROR_CONFIRMED"가 아니다 -
+     *  production 계산(estimatedBudgetKrw 등)에는 관여하지 않는다(표시 전용). */
+    seriesDataQualityAudit: SeriesGroupDataQualitySummary | null;
     /** PHASE 19-B — 신규 additive 필드. HIGH(=SERIES_STABLE)/MEDIUM(=SERIES_VOLATILE)/
      *  LOW(=PEER_FALLBACK) - legacy confidence/dataQualityV3와 완전히 독립적으로 계산된다
      *  (computePlanningReliability, lib/multiyear-series/reliability.ts). */
     reliabilityTier: PlanningReliabilityTier;
     /** reliabilityTier에 대응하는 사용자 설명 문구(Phase 18/19-B 확정 문구). */
     reliabilityReason: string;
+    /** READ-ONLY DIAGNOSTIC(G0 이후 Reliability Revalidation) — seriesSignal.status==="MATCHED"일
+     *  때만 채워진다. reasonKey/historicalDispersion/volatilityThreshold 전부 이미 계산된 값을
+     *  그대로 노출할 뿐 production 계산에는 관여하지 않는다(표시 전용). */
+    reliabilityDiagnostic: {
+        reasonKey: PlanningReliabilityReasonKey;
+        /** log(P75/P25) of CPI-adjusted historical budgets - historyCount<2면 null(정의 불가). */
+        historicalDispersion: number | null;
+        /** 이 planningYear의 leakage-safe calibration threshold - calibration 불가(pool<30)면 null. */
+        volatilityThreshold: number | null;
+    } | null;
 }
 
 export async function estimateMultiYearBudget(body: MultiYearBudgetEstimateRequest): Promise<MultiYearBudgetEstimateResponse> {
@@ -114,4 +136,67 @@ export async function searchMultiYearSeries(params: { q: string; planningYear: n
     }
 
     return data.results;
+}
+
+export interface DataQualityAuditResponse {
+    auditScope: {
+        description: string;
+        earliestDatasetYear: number;
+        latestDatasetYear: number;
+        dataRevision: number;
+    };
+    summary: GlobalDataQualityAuditSummary;
+    anomalies: SeriesDataQualityAuditRecord[];
+    matchedCount: number;
+    returnedCount: number;
+    helpText: string;
+}
+
+/**
+ * READ-ONLY DIAGNOSTIC(Series Data Quality Audit) — `/assistant-tester` 전용 read-only client.
+ * production 사용자 플로우는 이 함수를 호출하지 않는다. DB write 없음.
+ */
+export async function fetchDataQualityAudit(params: {
+    severity?: DataQualityAuditSeverity | "ALL";
+    reason?: DataQualityAuditReason;
+    q?: string;
+    limit?: number;
+}): Promise<DataQualityAuditResponse> {
+    const url = new URL("/api/v1/data-quality-audit", window.location.origin);
+    if (params.severity !== undefined) url.searchParams.set("severity", params.severity);
+    if (params.reason !== undefined) url.searchParams.set("reason", params.reason);
+    if (params.q !== undefined && params.q !== "") url.searchParams.set("q", params.q);
+    if (params.limit !== undefined) url.searchParams.set("limit", String(params.limit));
+
+    const res = await fetch(url.pathname + url.search);
+    const data = await res.json();
+
+    if (!res.ok) {
+        throw new Error(data.message ?? "데이터 품질 감사 조회에 실패했습니다.");
+    }
+
+    return data;
+}
+
+export interface ReliabilityAuditResponse {
+    dataRevision: number;
+    summary: ReliabilityBacktestSummary;
+    helpText: string;
+}
+
+/**
+ * READ-ONLY DIAGNOSTIC(G0 이후 Reliability Revalidation) — `/assistant-tester` 전용 read-only
+ * client. leakage-safe 2024~2026 fold backtest 사후 집계를 그대로 돌려받는다. production
+ * 사용자 플로우는 이 함수를 호출하지 않는다. DB write 없음. reliability tier 판정식 자체는
+ * 전혀 바꾸지 않는다.
+ */
+export async function fetchReliabilityAudit(): Promise<ReliabilityAuditResponse> {
+    const res = await fetch("/api/v1/reliability-audit");
+    const data = await res.json();
+
+    if (!res.ok) {
+        throw new Error(data.message ?? "Reliability 감사 조회에 실패했습니다.");
+    }
+
+    return data;
 }

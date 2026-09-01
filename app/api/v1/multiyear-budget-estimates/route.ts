@@ -9,8 +9,9 @@ import { ReferenceDataPolicy, resolveEffectivePolicy } from "@/lib/multiyear/ref
 import { filterReferencePool } from "@/lib/multiyear/reference-year-filter";
 import { MultiYearQuery } from "@/lib/multiyear/types";
 import { applySeriesPlanningSemantics } from "@/lib/multiyear-series/apply-planning-semantics";
+import { auditSeriesDataQuality, getCachedSeriesRecordBudgetComponents, SeriesGroupDataQualitySummary } from "@/lib/multiyear-series/data-quality-audit";
 import { getMultiYearDataRevision } from "@/lib/multiyear-series/data-revision";
-import { computePlanningReliability, EMPTY_FROZEN_SERIES_MODEL } from "@/lib/multiyear-series/reliability";
+import { computeCpiAdjustedVolatility, computePlanningReliability, EMPTY_FROZEN_SERIES_MODEL } from "@/lib/multiyear-series/reliability";
 import { getCachedFrozenSeriesModel, getCachedSeriesRecords, getCachedVolatilityThreshold } from "@/lib/multiyear-series/runtime-cache";
 import { buildSeriesHistoryDetail, SeriesHistoryDetailDto } from "@/lib/multiyear-series/series-history-detail";
 import { lookupTarget } from "@/lib/multiyear-series/series-lookup";
@@ -136,6 +137,17 @@ export async function POST(request: NextRequest) {
     // 노출한다(seriesSignal의 매칭 판정을 재사용할 뿐, 새로 매칭하지 않는다). MATCHED가 아니면
     // 항상 null - production 계산(estimatedBudgetKrw 등)에는 이 필드가 전혀 관여하지 않는다.
     let seriesHistoryDetail: SeriesHistoryDetailDto | null = null;
+    // READ-ONLY DIAGNOSTIC(Series Data Quality Audit) — assistant-tester 진단용 additive 필드.
+    // own-history.ts/computeSeriesSignal의 계산을 전혀 다시 하지 않는다 - 이미 계산된
+    // model/allSeriesRecords를 그대로 읽어 "이 Series의 VALID historical record 중 review가
+    // 필요해 보이는 것"만 진단할 뿐이다. estimatedBudgetKrw/recommendedBudgetKrw 등 production
+    // 계산 어디에도 이 필드는 입력으로 쓰이지 않는다(REVIEW_REQUIRED != DATA_ERROR_CONFIRMED).
+    let seriesDataQualityAudit: SeriesGroupDataQualitySummary | null = null;
+    // READ-ONLY DIAGNOSTIC(G0 이후 Reliability Revalidation) — reliability.ts의
+    // computeCpiAdjustedVolatility(private historicalMembers와 동일한 historical 집합)를 그대로
+    // 재사용해 raw dispersion 값만 노출한다. reliability tier 판정식 자체는 전혀 다시 만들지
+    // 않는다 - computePlanningReliability(아래에서 호출)가 낸 tier/reasonKey를 그대로 표시할 뿐.
+    let reliabilityHistoricalDispersion: number | null = null;
     if (festivalName && dataRevision !== null) {
       const allSeriesRecords = await getCachedSeriesRecords(prisma, dataRevision);
       const model = await getCachedFrozenSeriesModel(allSeriesRecords, dataRevision, planningYear);
@@ -165,6 +177,15 @@ export async function POST(request: NextRequest) {
             seriesSignal.estimateSource,
             seriesSignal.latestHistoricalYear
           );
+
+          // model은 이미 이 planningYear 기준 leakage-safe cutoff로 빌드됐으므로(9절/getCachedFrozenSeriesModel),
+          // 이 감사도 자동으로 datasetYear < planningYear만 본다(spec 21절 leakage safety 요구사항).
+          const componentsById = await getCachedSeriesRecordBudgetComponents(prisma, dataRevision);
+          const auditGroups = auditSeriesDataQuality(model, allSeriesRecords, componentsById);
+          seriesDataQualityAudit = auditGroups.find((g) => g.groupId === lookup.matchedGroupId) ?? null;
+
+          const historicalForDispersion = model.groupsById.get(lookup.matchedGroupId)!.members.filter((m) => m.datasetYear < planningYear);
+          reliabilityHistoricalDispersion = computeCpiAdjustedVolatility(historicalForDispersion, planningYear);
         }
       }
     }
@@ -206,11 +227,22 @@ export async function POST(request: NextRequest) {
       // assistant-tester 진단용 additive 필드 — Series MATCHED일 때만 채워진다(그 외 null).
       // production 계산 어디에서도 이 필드를 입력으로 읽지 않는다.
       seriesHistoryDetail,
+      // READ-ONLY DIAGNOSTIC(Series Data Quality Audit) — Series MATCHED일 때만 채워진다. severity/
+      // reasons는 "REVIEW_REQUIRED"를 뜻할 뿐 "DATA_ERROR_CONFIRMED"가 아니다 - 자동 수정/제외 없음.
+      seriesDataQualityAudit,
       // PHASE 19-B — additive 신규 필드. legacy dataQualityV3/confidence류와 이름·의미 모두
       // 분리된 사용자 신뢰도 표시용 필드(HIGH/MEDIUM/LOW + 설명 문구) - 기존 필드는 하나도
       // 지우거나 바꾸지 않았다.
       reliabilityTier: reliability.tier,
       reliabilityReason: reliability.reasonText,
+      // READ-ONLY DIAGNOSTIC(G0 이후 Reliability Revalidation) — Series MATCHED일 때만 채워진다.
+      // reasonKey/historicalDispersion/volatilityThreshold 전부 이미 계산된 값을 그대로 노출할
+      // 뿐이며, 이 필드의 존재가 estimatedBudgetKrw/recommendedBudgetKrw/reliabilityTier 등 다른
+      // 어떤 필드에도 영향을 주지 않는다(순수 표시용 additive 필드).
+      reliabilityDiagnostic:
+        seriesSignal.status === "MATCHED"
+          ? { reasonKey: reliability.reasonKey, historicalDispersion: reliabilityHistoricalDispersion, volatilityThreshold }
+          : null,
     });
   } catch (error) {
     console.error("[POST /api/v1/multiyear-budget-estimates]", error);

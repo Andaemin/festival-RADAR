@@ -534,6 +534,39 @@ describe("POST /api/v1/multiyear-budget-estimates - seriesSignal + basis metadat
     );
     expect(otherEligible.length).toBe(6);
     expect(otherEligible.every((r: { usedAsPointEstimateSource: boolean }) => r.usedAsPointEstimateSource === false)).toBe(true);
+
+    // READ-ONLY DIAGNOSTIC(Series Data Quality Audit) — additive 필드, estimatedBudgetKrw(72억)에
+    // 전혀 영향을 주지 않는다(위 assertion들과 완전히 동일). 부산국제록페스티벌은 지속 성장 케이스라
+    // DIGIT_SHIFT/ISOLATED_SPIKE/COMPONENT_MISMATCH로 오판되지 않아야 한다(spec 19절 known case).
+    expect(json.seriesDataQualityAudit).not.toBeNull();
+    expect(json.seriesDataQualityAudit.recordCount).toBe(7);
+    expect(json.seriesDataQualityAudit.hasDigitShiftPattern).toBe(false);
+    expect(json.seriesDataQualityAudit.hasIsolatedSpike).toBe(false);
+    expect(json.seriesDataQualityAudit.hasComponentMismatch).toBe(false);
+    expect(json.seriesDataQualityAudit.highCount).toBe(0);
+
+    // 2025(point estimate source, 72억)는 prior median 대비 정당한 review 신호(MEDIUM)를 가질 수
+    // 있다 - 이는 실제 다년간 성장을 반영한 것이지 오류가 아니다(HIGH가 아니어야 함).
+    const auditRow2025 = json.seriesDataQualityAudit.records.find((r: { datasetYear: number }) => r.datasetYear === 2025);
+    expect(auditRow2025).toBeDefined();
+    expect(auditRow2025.budgetQualityFlag).toBe("VALID");
+    expect(auditRow2025.severity).not.toBe("HIGH");
+    expect(auditRow2025.reasons).not.toContain("DIGIT_SHIFT_PATTERN");
+    expect(auditRow2025.reasons).not.toContain("ISOLATED_SPIKE_PATTERN");
+    expect(auditRow2025.reasons).not.toContain("COMPONENT_SUM_MISMATCH");
+
+    // READ-ONLY DIAGNOSTIC(G0 이후 Reliability Revalidation) — additive 필드, 위 estimate/
+    // recommendation/reliabilityTier 값에 전혀 영향을 주지 않는다. historyCount=7(>=2)이므로
+    // historicalDispersion은 항상 계산 가능해야 하고(null이면 안 됨), reasonKey는 tier와 구조적으로
+    // 일치해야 한다(MEDIUM<->SERIES_VOLATILE, HIGH+multi-history<->SERIES_STABLE).
+    expect(json.reliabilityDiagnostic).not.toBeNull();
+    expect(json.reliabilityDiagnostic.historicalDispersion).not.toBeNull();
+    if (json.reliabilityTier === "MEDIUM") {
+      expect(json.reliabilityDiagnostic.reasonKey).toBe("SERIES_VOLATILE");
+    } else {
+      expect(json.reliabilityTier).toBe("HIGH");
+      expect(json.reliabilityDiagnostic.reasonKey).toBe("SERIES_STABLE"); // historyCount=7이므로 SINGLE_HISTORY일 수 없다.
+    }
   });
 });
 

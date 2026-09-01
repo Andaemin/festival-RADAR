@@ -1,4 +1,20 @@
 /**
+ * ⚠ LEGACY / STALE VALIDATION — 이 파일의 "Phase 9C-B B1/R1 정의와의 교차검증" self-check는
+ * PHASE 19-A(Series recommendation이 peer-contingency 역산 공식에서 고정 +5% buffer로 바뀜,
+ * `lib/multiyear-series/apply-planning-semantics.ts` 참고) 이후로 stale하다 - 이 스크립트가
+ * 손으로 재구현한 `existingContingency` 기반 기대값 공식이 현재 production 공식과 다르기 때문에,
+ * **정상 상태에서도 crossCheckMismatches가 2242/2242(전체)로 출력된다.** 이 카운터는 현재
+ * production 정합성을 나타내지 않는다 - PASS/FAIL 판단에 쓰지 말 것.
+ *
+ * 위쪽에 출력되는 실제 MdAPE 등 성능 수치 자체는 (production 함수를 그대로 호출하므로) 여전히
+ * 유효하지만, OVERALL/SERIES/PEER 3-way 분리·reliability tier·gap distribution·Data Quality
+ * 교차·deterministic reproducibility 검증까지 포함한 canonical benchmark는 아래 파일이 담당한다:
+ *
+ *   scripts/final-production-benchmark.ts   (현재 canonical benchmark script)
+ *   final-production-benchmark-g0.md         (동결된 최종 수치)
+ *
+ * 이 파일은 과거 Phase 기록 보존 목적으로 유지하며, 이번 Phase에서 로직을 수정하지 않았다.
+ *
  * PHASE 9C-C — 6절 최종 offline benchmark. `applySeriesPlanningSemantics`(실제 production
  * 함수, lib/multiyear-series/apply-planning-semantics.ts)와 `computeSeriesSignal`(route.ts가
  * 쓰는 것과 동일한 함수)을 그대로 이용해 leakage-safe backtest(2024/2025/2026 fold, target
@@ -6,7 +22,8 @@
  *
  * 목적:
  *  1) estimatedBudgetKrw가 Phase 9C-B의 B1과, recommendedBudgetKrw가 R1과 정확히 일치하는지
- *     교차검증(같은 수식을 손으로 다시 짠 게 아니라 실제 production 함수로 재현).
+ *     교차검증(같은 수식을 손으로 다시 짠 게 아니라 실제 production 함수로 재현) — ⚠ 위 STALE
+ *     경고 참고, 현재는 이 교차검증 자체가 항상 "불일치"로 나온다.
  *  2) series unavailable(NOT_REQUESTED/UNMATCHED/AMBIGUOUS/NO_VALID_HISTORY) subset은
  *     기존 Planning V1과 완전히 동일해야 함을 assert.
  *  3) 최종 성능(overall/series-eligible/budget-size/fold별 MdAPE 등)을 기록.
@@ -163,7 +180,9 @@ async function main() {
 
   console.log("================ Phase 9C-C: applySeriesPlanningSemantics 최종 offline benchmark ================");
   console.log(`target 평가 대상: ${rows.length}건`);
-  console.log(`Phase 9C-B B1/R1 정의와의 교차검증 불일치: ${crossCheckMismatches}건 (0이어야 정상)`);
+  console.log(
+    `Phase 9C-B B1/R1 정의와의 교차검증 불일치: ${crossCheckMismatches}건 ⚠ STALE(PHASE 19-A 이후 항상 전체 건수로 나옴 - 파일 상단 LEGACY/STALE 경고 참고, PASS/FAIL 판단에서 제외됨)`
+  );
   console.log(`series unavailable subset 중 peer와 다른 값이 나온 건수: ${unavailableMismatches}건 (0이어야 정상 - 기존 Planning V1과 exact 동일해야 함)`);
   const eligible = rows.filter((r) => r.seriesEligible);
   console.log(`series-eligible(=estimateBasis SERIES_HISTORY_MEDIAN): ${eligible.length}건 (${((100 * eligible.length) / rows.length).toFixed(1)}%)`);
@@ -194,7 +213,10 @@ async function main() {
   console.log("");
 
   console.log("================ benchmark 끝 ================");
-  process.exit(crossCheckMismatches > 0 || unavailableMismatches > 0 ? 1 : 0);
+  // ⚠ STALE(파일 상단 경고 참고) — crossCheckMismatches는 PHASE 19-A 이후 항상 0보다 커서
+  // PASS/FAIL 판단에서 제외했다. unavailableMismatches(series unavailable subset이 기존 peer와
+  // 완전히 동일한지)는 여전히 유효한 검증이라 그대로 exit code에 반영한다.
+  process.exit(unavailableMismatches > 0 ? 1 : 0);
 }
 
 main().catch((e) => {
