@@ -65,9 +65,12 @@ flowchart TD
     D -- yes --> S[Series 경로]
 
     S --> S1[own-history 예산들]
-    S1 --> S2[CPI 보정<br/>targetYear-1 기준]
-    S2 --> S3[median]
-    S3 --> S4[estimatedBudget]
+    S1 --> S2[CPI 보정<br/>targetYear-1 기준, all-or-nothing]
+    S2 --> SG{latestHistoricalGap<br/>= targetYear - latestHistoricalYear}
+    SG -- "<= 2" --> SL[가장 최근<br/>comparable budget]
+    SG -- ">= 3" --> SM[historical 전체의<br/>median]
+    SL --> S4[estimatedBudget]
+    SM --> S4
     S4 --> S5["recommendedBudget<br/>= estimate × 1.05"]
     S5 --> S6[reliability<br/>HIGH / MEDIUM]
 
@@ -85,13 +88,23 @@ Series 경로가 선택되면 Peer 통계(P25/P50/P60/P75/sampleCount/dataQualit
 
 동일 축제 판별은 **frozen Series matcher**(`lib/multiyear-series/series-linker.ts`+`series-lookup.ts`)가 담당하며, 이 문서의 범위에서 matcher 자체의 내부 규칙(정규화/유사명 매칭 threshold 등)은 변경하지 않는다 — 이번 Phase는 물론 최근 여러 Phase에 걸쳐 matcher는 고정으로 취급됐다.
 
-계산 흐름(`lib/multiyear-series/own-history.ts`의 `computeOwnHistorySignal`):
+**G0(gap-aware estimator, 현재 production)** — 계산 흐름(`lib/multiyear-series/own-history.ts`의 `computeOwnHistorySignal`):
 
 1. matched group의 member 중 `datasetYear < targetYear`(과거만)인 것만 historical로 취급.
-2. 각 historical budget을 CPI로 planning year 기준 가격으로 환산(§6 참고).
-3. 환산된 값들의 **median**을 취해 `estimatedBudgetKrw`로 사용.
+2. 각 historical budget을 CPI로 planning year 기준 가격으로 환산(§6 참고, all-or-nothing fallback — §7).
+3. `latestHistoricalGap = targetYear - latestHistoricalYear`를 계산한다.
+4. **`latestHistoricalGap <= 2`면 가장 최근 comparable budget(LATEST)**을, **`latestHistoricalGap >= 3`이면 historical 전체의 median(MEDIAN)**을 `estimatedBudgetKrw`로 쓴다.
 
-Peer와 달리 Series는 후보 가중치라는 개념이 없다 — 단순 median이다(Phase 9A-Safety: median이 large-underprediction 개선을 상당 부분 유지하면서 catastrophic tail을 가장 안정적으로 억제한다는 결론에 따라 고정됨. actual budget 크기에 따라 median/geometric mean 등을 바꿔 쓰는 라우팅은 하지 않는다 — 추정 시점에는 실제 값(actual)을 알 수 없어 그런 라우팅 자체가 성립하지 않는다).
+```
+latestHistoricalGap <= 2  →  가장 최근 유효 계획예산(LATEST)
+latestHistoricalGap >= 3  →  동일 축제 과거 예산 전체의 median(MEDIAN)
+```
+
+threshold(`GAP_THRESHOLD_FOR_LATEST=2`)는 leakage-safe backtest(n≈2242, 2024~2026 fold)로 확정된 값이며, 이 문서 갱신 시점에도 재튜닝하지 않았다. **실측(2024~2026 backtest)상 LATEST가 Series 표본의 90.3%를 차지한다** — LATEST는 "특별 보정"이 아니라 Series 방식의 정상적인 다수 경로다(§17/tester wording 참고).
+
+MEDIAN 분기(`latestHistoricalGap >= 3`)는 G0 이전과 계산 자체가 동일하다 — Peer와 달리 Series는 후보 가중치라는 개념이 없다(Phase 9A-Safety: median이 large-underprediction 개선을 상당 부분 유지하면서 catastrophic tail을 가장 안정적으로 억제한다는 결론에 따라 고정됨. actual budget 크기에 따라 median/geometric mean 등을 바꿔 쓰는 라우팅은 하지 않는다 — 추정 시점에는 실제 값(actual)을 알 수 없어 그런 라우팅 자체가 성립하지 않는다). isolated-spike guard(단발성 이상치 방어) 같은 추가 heuristic은 의도적으로 넣지 않았다 — false protection이 더 크다는 결론으로 REJECT됐다.
+
+LATEST 분기의 CPI 처리는 MEDIAN과 완전히 동일한 all-or-nothing 규칙을 공유한다 — LATEST만 별도로 CPI 가용성을 판단하지 않는다(§7).
 
 CPI 보정 공식(source year `s`, planning year `Y`):
 
@@ -132,6 +145,32 @@ leakage-safe하게 실측해 확정한 정책이며(CPI production 반영은 `a6
 `tryAdjustForCpi`가 필요한 두 연도(`sourceYear`, `planningYear-1`) 중 하나라도 `CPI_TABLE`에 없으면(예: `planningYear >= 2027`) `null`을 반환한다. 이때 **해당 target의 historical 예산 전체가 nominal(CPI 미보정) median으로 fallback**한다 — 일부는 CPI 보정된 값, 일부는 nominal 값을 섞어 median을 계산하지 않는다(`own-history.ts`의 `cpiFullyAvailable` 체크가 "전부 가능"이 아니면 즉시 전체를 nominal로 되돌린다).
 
 부분 혼합을 하지 않는 이유: 서로 다른 기준 시점(일부는 물가 보정됨, 일부는 안 됨)의 값을 한 분포에 섞으면 median 자체의 의미가 불분명해지고, 어떤 연도 조합이 fallback을 유발했는지에 따라 결과가 미묘하게 달라지는 예측 불가능한 동작이 생긴다. "전부 보정 아니면 전부 nominal"이 가장 단순하고 설명 가능한 규칙이다.
+
+### 7.1 Future-year semantics
+
+보유 canonical dataset은 2026까지다. `planningYear`가 그보다 미래(2027 이상)여도 알고리즘은 새 데이터를 만들거나 보간하지 않는다 — 항상 실제 존재하는 과거 데이터만 쓴다.
+
+```
+planningYear = Y
+→ datasetYear < Y인 record만 참조(§3 leakage-safe 원칙 그대로, 미래로 확장해도 예외 없음)
+
+latestHistoricalGap <= 2  → LATEST
+latestHistoricalGap >= 3  → MEDIAN
+
+CPI_TABLE에 필요한 연도가 없으면(예: planningYear >= 2027, CPI_TABLE은 2025까지만 지원)
+→ 해당 Series 전체 nominal fallback(§7, LATEST/MEDIAN 두 분기 모두 동일 규칙)
+```
+
+예시(동일 축제, `latestHistoricalYear=2026`인 경우 — 실제 부산국제록페스티벌로 leakage-safe backtest 재현 완료):
+
+| planningYear | gap | 분기 | CPI |
+| --- | --- | --- | --- |
+| 2027 | 1 | LATEST | nominal fallback(CPI[2026] 없음) |
+| 2028 | 2 | LATEST | nominal fallback(CPI[2027] 없음) |
+| 2029 | 3 | MEDIAN | nominal fallback(CPI[2028] 없음) |
+| 2030 | 4 | MEDIAN | nominal fallback(CPI[2029] 없음) |
+
+recommendation(`estimate × 1.05`)과 reliability(§17) 계산 방식도 미래 planningYear라고 해서 달라지지 않는다 — "미래라서 추가 buffer를 더 얹는다"거나 "미래라서 fallback 정책이 바뀐다" 같은 특수 처리는 없다. reliability의 leakage-safe calibration threshold(§17)는 실제 보유 데이터(2018~2026 fold)로 saturate되므로, planningYear가 아무리 먼 미래여도(예: 2035) 계산이 항상 가능하다(calibration pool 부족으로 threshold를 못 구하면 HIGH로 안전하게 fallback — 이 fallback 방향도 이번 문서 갱신에서 바꾸지 않았다).
 
 ## 8. Peer estimator
 
@@ -273,6 +312,10 @@ Series 경로에서도 응답의 `p25Krw`/`p75Krw`는 **Series 자체가 아니�
 
 내부적으로 tier는 `tierFromVolatility`(`lib/multiyear-series/reliability.ts`)가 결정한다 — historyCount≤1이면 무조건 HIGH(변동성 계산 불가), 그 외에는 CPI 보정 historical 예산의 `log(P75/P25)`(volatility)가 leakage-safe threshold 이하면 HIGH, 초과하면 MEDIUM이다. 이 threshold는 하드코딩된 상수가 아니라 매 planning year마다 과거 backtest 데이터로 다시 계산되는 leakage-safe median이다(`computeLeakageSafeVolatilityThreshold`, `runtime-cache.ts`가 캐싱).
 
+**G0 도입 이후 재검증 결과(§24)**: HIGH/MEDIUM의 **실측 정확도(MdAPE)는 서로 비슷해졌다**(HIGH 9.28% vs MEDIUM 10.00%, G0 이전에는 10.66% vs 21.19%로 훨씬 크게 벌어져 있었다). 그러나 **historical dispersion(변동성) 자체는 여전히 명확하게 다르다** — dispersion median이 HIGH 0.0474, MEDIUM 0.2303으로 약 5배 차이난다. 즉 tier가 "정확도 등급"으로 잘못 읽힐 위험은 G0 이전보다 오히려 커졌지만(정확도만 보면 거의 구분이 안 되므로), tier가 담고 있는 "과거 데이터 근거의 안정성" 정보 자체는 여전히 유효하다 — 그래서 아래 문구가 이전보다 더 중요하다:
+
+> 신뢰도는 예산이 맞을 확률이 아니라, 이 추정에 사용한 데이터 근거의 안정성/강도를 나타낸다.
+
 ## 18. historyCount=1 설명
 
 **아래는 현재 production(commit `a6defed`)을 기준으로 서술하며, 이 문서 자체가 항상 최신 source of truth다.**
@@ -286,10 +329,29 @@ Series 경로에서도 응답의 `p25Krw`/`p75Krw`는 **Series 자체가 아니�
 
 즉 history가 1개뿐인 경우 "연도별 변동이 안정적"이라고 **설명하지 않는다** — 측정 자체가 불가능했던 것을 "측정해봤더니 안정적이었다"처럼 표현하면 근거를 과장하게 되기 때문이다(Phase 20에서 최초 발견, Phase 30에서 재확인 — HIGH tier 1,200건 중 571건(47.58%)이 이 케이스였다. Phase 31-B가 이 문구만 분리 수정했다 — tier 산정 자체는 변경되지 않았다).
 
+**G0 이후 재검증(중요)**: `SERIES_STABLE_SINGLE_HISTORY` cohort(HIGH의 47.6%, n=571)의 실측 MdAPE는 **10.81%로, MEDIUM(10.00%)보다도 나쁘다** — 반면 실제로 다년간 이력이 있어 변동성을 측정한 `SERIES_STABLE` cohort(n=629)는 7.93%로 가장 정확하다. 즉 **"HIGH라고 해서 반드시 여러 해의 안정성이 검증된 것은 아니다"** — HIGH 태그 하나로 두 성격이 다른 cohort(측정된 안정성 vs 측정 불가로 인한 기본값)가 섞여 있다는 사실을 tester/handoff 문서 모두에서 명확히 알린다. tier 로직 자체는 이 문서 갱신에서도 변경하지 않았다.
+
 MEDIUM(`SERIES_VOLATILE`)과 LOW(`PEER_FALLBACK`) 문구는 이번 수정과 무관하게 그대로다:
 
 - MEDIUM: "동일 축제의 과거 예산 이력을 활용했지만, 물가 보정 후 연도별 예산 변동폭이 큰 편입니다."
 - LOW: "동일 축제의 충분한 과거 예산 이력을 확인하지 못해 유사 축제 데이터를 기반으로 추정했습니다."
+
+### 18.1 Data Quality Audit — Reliability와는 별개 axis
+
+Series 결과에 대해 **read-only diagnostic**으로 Data Quality Audit(`lib/multiyear-series/data-quality-audit.ts`)이 함께 제공된다. estimator/reliability 어느 쪽 계산에도 관여하지 않으며, 값을 자동 수정하거나 계산에서 자동 제외하지 않는다.
+
+```
+Reliability          → historical evidence/stability(§17) - "이 데이터가 연도별로 얼마나 흔들렸는가"
+Data Quality Audit   → source-value review signal - "이 개별 record 값이 Series 문맥에서 검토할 가치가 있는가"
+```
+
+두 개념은 **자동으로 연결되지 않는다**:
+
+- **Audit HIGH ≠ Reliability LOW** — 둘 다 실측으로 독립성이 확인됐다(같은 point-estimate source record가 reliability=HIGH이면서 audit=HIGH인 경우가 실제로 존재한다 — 예: 해운대모래축제 2025 backtest 사례, reliability는 HIGH였지만 point-estimate source가 audit MEDIUM이라 실제로 크게 틀렸다).
+- **Audit signal ≠ 자동 제외** — REVIEW_REQUIRED일 뿐 DATA_ERROR_CONFIRMED가 아니다. 값은 그대로 계산에 쓰인다.
+- **Audit signal ≠ 자동 보정** — audit이 값을 바꾸지 않는다.
+
+**audit 범위는 "Series에 연결된 VALID budget records"**로 한정된다 — own-history eligibility(VALID budget + region/유형 존재)를 통과해 실제로 어떤 Series 그룹에 연결된 record만 대상이며, "전체 축제 데이터"나 "canonical dataset 전체"가 아니다. 실측(2024~2026 backtest): reliability=HIGH cohort는 point-estimate source에 audit signal이 있는 경우가 0.75%(9/1200)에 불과하지만, MEDIUM cohort는 8.54%(89/1042)로 훨씬 흔하다 — MEDIAN 분기가 eligible record 전체를 point-estimate source로 쓰기 때문에(LATEST는 record 1건만) 노출 표면이 넓어지는 구조적 차이다.
 
 ## 19. Legacy confidence
 
@@ -335,7 +397,7 @@ Phase 26에서 확인된 2017–2024 `venueType`(장소 유형) 정보 부재는
 
 ## 23. Current authoritative benchmark
 
-Deterministic ordering + corrected duration data(둘 다 commit `a477856`) 반영 기준, 2024–2026 leakage-safe:
+**⚠ OLD BASELINE(median-fixed Series, G0 이전) — 역사적 기록으로만 남긴다. 현재 알고리즘 성능 비교에 쓰지 않는다:**
 
 | Metric | 값 |
 | --- | --- |
@@ -345,14 +407,24 @@ Deterministic ordering + corrected duration data(둘 다 commit `a477856`) 반�
 | Peer MdAPE | 69.04% |
 | Overall P90 | 155.34% |
 | Overall P95 | 363.06% |
-| Peer P90 | 471.06% |
-| Peer P95 | 709.75% |
 
-이것이 **현재 authoritative estimate benchmark**다. 과거 기록된 Peer MdAPE 67.62%(Phase 27 시점)는 **deterministic ordering 적용 이전의, DB row-order에 의존하는 우연한 snapshot**이었다 — 같은 논리적 데이터를 다른 순서로 읽으면 67.62%~70.20% 범위에서 다른 값이 나왔다(Phase 28 실측). 이 값은 역사적 기록으로만 남기고, 현재 알고리즘 성능 비교의 baseline으로는 위 69.04%(deterministic, 재현 가능)를 쓴다.
+**✅ FINAL G0(현재 production, canonical benchmark) — `scripts/final-production-benchmark.ts` 실제 production 함수 직접 호출, 2024–2026 leakage-safe, 2-pass 실행 SHA-256 hash 완전 일치로 재현성 확인 완료:**
+
+| Group | n | Estimate MdAPE | Recommendation MdAPE | P90 | P95 |
+| --- | --- | --- | --- | --- | --- |
+| OVERALL | 3,432 | **20.63%** | 20.06% | 153.55% | 355.33% |
+| SERIES | 2,242 | **9.59%** | **8.76%** | 50.00% | 75.69% |
+| PEER | 1,190 | **69.04%** | 77.74% | 471.06% | 709.75% |
+
+Series 개선폭: Estimate MdAPE **16.28% → 9.59%**(-6.69%p, 약 41% 오차 감소), Recommendation MdAPE **15.33% → 8.76%**(-6.57%p). Peer는 알고리즘이 이 기간 전혀 바뀌지 않아 구조적으로 parity가 보장된다(§10 참고) — 실측 MdAPE(69.04%)와 severe underprediction rate(23.19%, §25)가 이전 기록과 정확히 일치하는 것으로 재확인했다. Overall 개선은 population이 그대로인 상태에서 Series 개선이 그대로 반영된 결과다.
+
+**PEER 그룹(n=1,190)은 old peer benchmark와 알고리즘이 동일하다.** MdAPE가 SERIES보다 훨씬 높은 것은 알고리즘 저하가 아니라 population selection 효과다 — 이 그룹은 "Series로 못 잡히는(매칭 안 되거나 own-history가 없는) 나머지"이므로 원래 더 어려운 subset이 여기 몰린다(§26.1 참고).
+
+과거 기록된 Peer MdAPE 67.62%(Phase 27 시점)는 **deterministic ordering 적용 이전의, DB row-order에 의존하는 우연한 snapshot**이었다 — 같은 논리적 데이터를 다른 순서로 읽으면 67.62%~70.20% 범위에서 다른 값이 나왔다(Phase 28 실측). 이 값은 역사적 기록으로만 남기고, 현재 알고리즘 성능 비교의 baseline으로는 위 69.04%(deterministic, 재현 가능)를 쓴다.
 
 ## 24. Reliability latest benchmark
 
-Phase 30/31-B(commit `a6defed`) 기준 재확인:
+**⚠ OLD BASELINE(G0 이전) — 역사적 기록:**
 
 | Tier | n | 비율 | Estimate MdAPE |
 | --- | --- | --- | --- |
@@ -360,13 +432,29 @@ Phase 30/31-B(commit `a6defed`) 기준 재확인:
 | MEDIUM | 1,042 | 30.36% | 21.19% |
 | LOW | 1,190 | 34.67% | 69.04% |
 
-fold별(2024/2025/2026) 전부 **HIGH < MEDIUM < LOW** ordering이 예외 없이 유지된다.
+**✅ FINAL G0(현재 production):**
+
+| Tier | n | 비율 | Estimate MdAPE | Recommendation MdAPE |
+| --- | --- | --- | --- | --- |
+| HIGH | 1,200 | 34.97% | **9.28%** | 8.93% |
+| MEDIUM | 1,042 | 30.36% | **10.00%** | 8.47% |
+| LOW | 1,190 | 34.67% | 69.04% | 77.74% |
+
+fold별(2024/2025/2026) 전부 **HIGH < MEDIUM < LOW** ordering이 예외 없이 유지된다. 다만 G0 이전(10.66% vs 21.19%, 약 2배 차이)과 달리 **HIGH/MEDIUM의 실측 정확도 차이는 G0 이후 크게 줄었다**(9.28% vs 10.00%) — §17의 "정확도 등급이 아니라 데이터 근거의 안정성 지표" 설명이 이제 더 중요해진 이유다.
 
 ## 25. Recommendation benchmark
 
-| Branch | Recommendation MdAPE | Severe underprediction(<actual×0.7) |
+**⚠ OLD BASELINE(G0 이전):**
+
+| Branch | Recommendation MdAPE |
+| --- | --- |
+| Series | 15.33% |
+
+**✅ FINAL G0(현재 production):**
+
+| Branch | Recommendation MdAPE | Severe underprediction(recommended<actual×0.7) |
 | --- | --- | --- |
-| Series | 15.33% | 14.81% |
+| Series | **8.76%** | 10.35% |
 | Peer | 77.74% | 23.19% |
 
 **Recommendation은 point prediction 정확도를 최적화한 값이 아니라 planning-conservative policy(항상 estimate 이상으로 보수적으로 제안)다.** Recommendation MdAPE가 estimate MdAPE보다 나쁠 수 있다는 사실 자체가 결함이 아니다 — 단순 accuracy ranking으로 오해해서는 안 된다.
@@ -520,7 +608,14 @@ Series는 production-ready baseline으로 확정한다. Peer는 selector/N/perce
 
 ## 29. Reproducibility / tests
 
-현재 regression: `vitest run` **183/183 passing**. deterministic candidate order(§11) 회귀 테스트(`test/lib/multiyear/stable-candidate-order.test.ts`)와 2027 synthetic safety 테스트(`test/lib/multiyear-series/synthetic-2027-safety.test.ts`, 미래 연도에 대해서도 예외 없이 안전하게 동작하는지 확인)가 포함되어 있다.
+현재 regression: `vitest run` **291/291 passing**(25 test files). deterministic candidate order(§11) 회귀 테스트(`test/lib/multiyear/stable-candidate-order.test.ts`)와 2027 synthetic safety 테스트(`test/lib/multiyear-series/synthetic-2027-safety.test.ts`, 미래 연도에 대해서도 예외 없이 안전하게 동작하는지 확인)가 포함되어 있다. G0/Data Quality Audit/Reliability revalidation/Future-year safety 관련 회귀도 함께 포함됐다:
+
+- G0 gap transition(2027 gap=1→LATEST ~ 2030 gap=4→MEDIAN, `test/api/future-year-safety.test.ts`) — production route를 직접 호출하는 pinned regression.
+- Data Quality Audit golden case(밀양대추축제/밀양아리랑대축제/부산국제록페스티벌 실제 DB, `test/lib/multiyear-series/data-quality-audit-golden.test.ts`).
+- Reliability backtest baseline parity(§24 수치 재현, `test/lib/multiyear-series/reliability-backtest.test.ts`).
+- 전체 canonical benchmark(§23~§25) 재현 스크립트: `scripts/final-production-benchmark.ts`(2-pass 실행, SHA-256 hash 완전 일치로 deterministic 확인 완료).
+
+**참고(infra, 알고리즘 결함 아님)**: 전체 suite를 병렬로 한 번에 돌리면 가장 무거운 backtest 기반 테스트 파일 1~2개가 DB/CPU 경합으로 간헐적 timeout이 날 수 있다(로직 실패가 아니라 리소스 경합) — 해당 파일만 단독 실행하면 항상 통과한다. 이 저장소의 `vitest.config.ts`/timeout 설정은 이 목적을 위해 변경하지 않았다.
 
 ### Appendix — 관련 commit
 
@@ -530,9 +625,12 @@ Series는 production-ready baseline으로 확정한다. Peer는 selector/N/perce
 | --- | --- |
 | Series/Peer estimator, CPI(Series-only), recommendation, reliability, API contract 등 최종 production 알고리즘 전체 | `a6defed` |
 | Duration data 정합성 복구 + deterministic Peer candidate ordering | `a477856` |
+| G0(gap-aware Series estimator) | `d97145f` |
 | 이 문서 + UI 인계 문서 | (이 문서가 포함된 commit 자신 — `git log --oneline -1 -- docs/budget-algorithm-final.md`로 확인) |
 
 hash는 이 문서가 마지막으로 커밋된 시점 기준이며, 이후 history가 다시 재구성되면 stale해질 수 있으므로 항상 `git log --oneline`을 우선한다.
+
+**아직 커밋되지 않은 작업(이 문서 갱신 시점 기준, 사용자 승인 대기)**: Data Quality Audit(§18.1) lib/API/UI/test, Reliability diagnostic API/UI/test(§17/§24), Future-year safety UI/test(§7.1), canonical benchmark script(`scripts/final-production-benchmark.ts`). 이 문서의 §23~§25 수치는 이미 이 미커밋 코드로 재현한 값이다 — 코드가 커밋되면 이 각주는 제거한다.
 
 ## 30. Production Algorithm at a Glance
 
@@ -540,7 +638,7 @@ hash는 이 문서가 마지막으로 커밋된 시점 기준이며, 이후 hist
 | --- | --- |
 | Dataset | 2017–2026, 10,198 rows |
 | Leakage 원칙 | reference year < planning year |
-| Series estimate | CPI-adjusted own-history median |
+| Series estimate | G0(gap-aware): latestHistoricalGap<=2면 최근 comparable budget(LATEST), >=3이면 CPI-adjusted own-history median(MEDIAN) — 실측상 LATEST가 90.3% |
 | Peer estimate | weighted geometric mean(weight=similarity²) |
 | Series recommendation | estimate × 1.05(고정) |
 | Peer recommendation | max(estimate, P60) |
