@@ -9,16 +9,25 @@ import { FrozenSeriesModel, MatchMethod, SeriesRecordLite } from "./types";
  *
  * PHASE 9C-C부터 `computeSeriesSignal`(lib/multiyear-series/series-signal.ts)을 거쳐 실제
  * public Planning API 응답(estimatedBudgetKrw 등)에 연결되어 있다 - 더 이상 진단 전용이 아니다.
- * Phase 9A-Safety 결론에 따라 production candidate 값은
- * `seriesEstimatedBudget = median(valid historical planned budgets)`으로 고정한다 - 단
- * latestBudget(SER1)도 함께 계산해 둔다(제거하지 않음, diagnostics/history-count reliability
- * 연구용). PHASE 16-C부터 이 median은 CPI-adjusted다(Phase 16-B C2 확정 semantics) - 아래
+ * PHASE 16-C부터 median은 CPI-adjusted다(Phase 16-B C2 확정 semantics) - 아래
  * `medianBudgetKrw`/`medianBudgetKrwNominal` 필드 설명 참고.
  *
- * actual-budget bucket에 따른 adaptive routing(예: actual>=1B -> median, <1B -> blend)은
- * 절대 하지 않는다 - inference 시점에는 actualBudget을 알 수 없어 그런 라우팅 자체가 성립하지
- * 않는다(Phase 9A-Safety 결론).
+ * PHASE G0(leakage-safe backtest n=2242, 2024~2026 fold 전부 확인 - 연구 문서 참고) — production
+ * candidate가 median 고정에서 **gap-aware**(=G0)로 바뀌었다: `latestHistoricalGap =
+ * targetYear - latestHistoricalYear`가 2 이하면 가장 최근 comparable budget(LATEST)을, 3 이상이면
+ * 기존 median(MEDIAN, Phase 9A-Safety 결론 그대로 - 로직 무변경)을 그대로 쓴다. 이 threshold(2)는
+ * 연구로 고정된 값이며 이 함수에서 임의로 튜닝하지 않는다. isolated-spike guard(단발성 이상치
+ * 방어) 같은 추가 heuristic은 의도적으로 넣지 않았다 - 별도 연구에서 false protection이 더 커서
+ * REJECT됐다(같은 연구 문서 참고). actual-budget bucket에 따른 adaptive routing(예: actual>=1B ->
+ * median, <1B -> blend)은 여전히 절대 하지 않는다 - inference 시점에는 actualBudget을 알 수 없어
+ * 그런 라우팅 자체가 성립하지 않는다(Phase 9A-Safety 결론, G0도 동일 원칙 위에서 gap만 본다).
  */
+export type SeriesEstimateSource = "LATEST" | "MEDIAN";
+
+/** PHASE G0 — `latestHistoricalGap`이 이 값 이하면 LATEST 분기, 초과면 MEDIAN 분기. 연구로 고정된
+ *  값(threshold grid에서 재확인됨) - 여기서 재튜닝하지 않는다. */
+const GAP_THRESHOLD_FOR_LATEST = 2;
+
 export interface OwnHistorySignal {
   targetRecordId: number;
   targetMatchMethod: MatchMethod;
@@ -57,7 +66,23 @@ export interface OwnHistorySignal {
   /** historical VALID budget 원본 배열(오름차순 정렬) - range/spread 진단용. */
   historicalBudgetsKrw: number[];
 
-  /** = medianBudgetKrw. Series 없거나 ambiguous이거나 VALID history가 없으면 null. */
+  /** PHASE G0 — `targetYear - latestHistoricalYear`. historyCount=0이면 null(gap을 정의할
+   *  latest가 없음). */
+  latestHistoricalGap: number | null;
+  /** PHASE G0 — latestBudgetKrw(nominal, SER1)의 comparable(=medianBudgetKrw와 완전히 동일한
+   *  all-or-nothing CPI 규칙을 재사용한) 버전. 별도 CPI 가용성 판단을 새로 하지 않는다 - median
+   *  분기가 이미 계산한 `cpiFullyAvailable`을 latest 분기도 그대로 공유한다(일부 record만
+   *  CPI-adjust되는 것을 방지). CPI 미가용이면 latestBudgetKrw와 값이 같다. */
+  latestComparableBudgetKrw: number | null;
+  /** PHASE G0 — `seriesEstimatedBudget`이 실제로 어느 값에서 왔는지: latestHistoricalGap이
+   *  {@link GAP_THRESHOLD_FOR_LATEST} 이하면 "LATEST"(=latestComparableBudgetKrw), 초과면
+   *  "MEDIAN"(=medianBudgetKrw, 기존 production 로직 그대로 - 이 분기의 계산 자체는 전혀
+   *  바뀌지 않았다). historyCount=0이면 null. */
+  estimateSource: SeriesEstimateSource | null;
+
+  /** PHASE G0부터: estimateSource==="LATEST"면 latestComparableBudgetKrw, "MEDIAN"이면
+   *  medianBudgetKrw(Phase 9A-Safety 이후와 동일). Series 없거나 ambiguous이거나 VALID history가
+   *  없으면 null. */
   seriesEstimatedBudget: number | null;
 }
 
@@ -78,6 +103,9 @@ function nullSignal(target: SeriesRecordLite, matchMethod: MatchMethod, ambiguou
     seriesP25Krw: null,
     seriesP75Krw: null,
     historicalBudgetsKrw: [],
+    latestHistoricalGap: null,
+    latestComparableBudgetKrw: null,
+    estimateSource: null,
     seriesEstimatedBudget: null,
   };
 }
@@ -123,12 +151,27 @@ export function computeOwnHistorySignal(target: SeriesRecordLite, targetYear: nu
   // PHASE 16-C — Series CPI production 반영(Phase 16-B C2 확정: Series에만 CPI 적용, Peer는
   // 미적용). historical budget 각각을 targetYear-1 가격 수준으로 환산한 뒤 median을 계산해
   // production estimatedBudget에 쓴다. historyCount/matchMethod/historicalYears/latestBudgetKrw
-  // 등 identity·diagnostics 필드는 전혀 건드리지 않는다 - 오직 median(=seriesEstimatedBudget)만
-  // 바뀐다. CPI_TABLE에 없는 연도가 하나라도 관련되면(예: targetYear>=2027) 전부 nominal로
-  // fallback한다(가장 가까운 연도를 대신 쓰거나 추정하지 않는다 - cpi.ts 참고).
+  // 등 identity·diagnostics 필드는 전혀 건드리지 않는다 - 오직 median(=medianBudgetKrw)만 바뀐다.
+  // CPI_TABLE에 없는 연도가 하나라도 관련되면(예: targetYear>=2027) 전부 nominal로 fallback한다
+  // (가장 가까운 연도를 대신 쓰거나 추정하지 않는다 - cpi.ts 참고).
   const adjustedBudgets = historical.map((h) => tryAdjustForCpi(h.budgetKrw, h.datasetYear, targetYear));
   const cpiFullyAvailable = adjustedBudgets.every((v): v is number => v !== null);
   const medianBudgetKrw = cpiFullyAvailable ? Math.round(quantile(adjustedBudgets as number[], 0.5)) : medianBudgetKrwNominal;
+
+  // PHASE G0 — latest 분기용 comparable 값. median과 완전히 같은 all-or-nothing CPI 판단
+  // (cpiFullyAvailable)을 그대로 재사용한다 - latest만 별도로 CPI 가용성을 다시 판단하지 않는다.
+  // historical/adjustedBudgets는 인덱스가 1:1로 대응하므로, latestRecord의 인덱스를 찾아 같은
+  // 위치의 CPI-adjusted 값을 쓴다(동일 latest year tie-break로 고른 latestRecord와 반드시 같은
+  // record를 가리켜야 하므로 id로 다시 찾는다 - historical 배열의 마지막 원소가 항상 latestRecord와
+  // 같다는 보장이 없다: 동일 연도 tie가 있으면 정렬 순서 때문에 배열 마지막 원소는 id가 가장 큰
+  // record가 되지만, latestRecord는 위에서 id가 가장 작은 쪽으로 이미 결정적으로 고정했다).
+  const latestRecordIndex = historical.findIndex((h) => h.id === latestRecord.id);
+  const latestAdjusted = adjustedBudgets[latestRecordIndex];
+  const latestComparableBudgetKrw = cpiFullyAvailable ? Math.round(latestAdjusted!) : latestRecord.budgetKrw;
+
+  const latestHistoricalGap = targetYear - latestYear;
+  const estimateSource: SeriesEstimateSource = latestHistoricalGap <= GAP_THRESHOLD_FOR_LATEST ? "LATEST" : "MEDIAN";
+  const seriesEstimatedBudget = estimateSource === "LATEST" ? latestComparableBudgetKrw : medianBudgetKrw;
 
   return {
     targetRecordId: target.id,
@@ -146,6 +189,9 @@ export function computeOwnHistorySignal(target: SeriesRecordLite, targetYear: nu
     seriesP25Krw,
     seriesP75Krw,
     historicalBudgetsKrw: sortedBudgets,
-    seriesEstimatedBudget: medianBudgetKrw,
+    latestHistoricalGap,
+    latestComparableBudgetKrw,
+    estimateSource,
+    seriesEstimatedBudget,
   };
 }

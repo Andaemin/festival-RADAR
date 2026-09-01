@@ -248,6 +248,18 @@ describe("POST /api/v1/multiyear-budget-estimates - seriesSignal + basis metadat
     expect(json.seriesSignal.historyCount).toBeGreaterThanOrEqual(2); // volatility 계산 가능 전제
     expect(json.reliabilityTier).toBe("MEDIUM");
     expect(json.reliabilityReason).toBe("동일 축제의 과거 예산 이력을 활용했지만, 물가 보정 후 연도별 예산 변동폭이 큰 편입니다.");
+    // PHASE G0 — 부산국제록 외의 실제 Series MATCHED 케이스에서도 새 additive 필드가 정상 배선되는지
+    // 확인(정확한 값은 부산국제록 golden case가 이미 검증했으므로, 여기서는 "정의돼 있고 estimateSource에
+    // 맞춰 seriesEstimatedBudgetKrw가 일관되는지"만 재확인한다).
+    expect(json.seriesSignal.latestHistoricalGap).toBeGreaterThan(0);
+    expect(["LATEST", "MEDIAN"]).toContain(json.seriesSignal.estimateSource);
+    expect(json.seriesHistoryDetail.estimateSource).toBe(json.seriesSignal.estimateSource);
+    const pointEstimateRecords = json.seriesHistoryDetail.records.filter((r: { usedAsPointEstimateSource: boolean }) => r.usedAsPointEstimateSource);
+    if (json.seriesSignal.estimateSource === "LATEST") {
+      expect(pointEstimateRecords.length).toBe(1);
+    } else {
+      expect(pointEstimateRecords.length).toBe(json.seriesHistoryDetail.eligibleForSeriesCalculationCount);
+    }
 
     // peer evidence/statistics(P25/P50/P60/P75/weightedAverage/sampleCount/dataQuality)는
     // series 적용 전 peer 결과와 완전히 동일해야 한다(Series로 대체되지 않음).
@@ -433,6 +445,95 @@ describe("POST /api/v1/multiyear-budget-estimates - seriesSignal + basis metadat
     expect(json.p25Krw).toBe(peer.p25Krw);
     expect(json.p75Krw).toBe(peer.p75Krw);
     expect(json.recommendedBudgetKrw).toBe(Math.round(json.seriesSignal.seriesEstimatedBudgetKrw * (1 + SERIES_PLANNING_BUFFER_RATE)));
+  });
+
+  /**
+   * route-level regression — 실제 API 호출 경로(POST 핸들러, 이 파일의 다른 테스트와 동일하게
+   * NextRequest를 만들어 실제 export된 POST를 그대로 호출)에서 부산국제록페스티벌이 정확히
+   * MATCHED로 처리되는지 확인한다. 이 케이스는 한때 curl 커맨드라인 인자로 한글 festivalName을
+   * 전달했을 때(Windows Git Bash → 네이티브 curl.exe 인자 인코딩 문제)만 UNMATCHED로 잘못
+   * 보이는 진단 혼선이 있었다 - route.ts/computeSeriesSignal/lookupTarget 자체는 항상 정확했다
+   * (direct 함수 호출·in-process route 호출 모두 MATCHED로 일치했음). 이 테스트는 NextRequest에
+   * JS 문자열을 그대로 실어 보내 그런 인코딩 문제가 재발해도(또는 다른 경로 통합 문제가 생겨도)
+   * 바로 잡아낸다.
+   */
+  it("route 경계 regression — 부산국제록페스티벌 planningYear=2026: 실제 POST 핸들러 호출에서도 MATCHED (leakage-safe: 2026 미포함, historyCount=7)", async () => {
+    const { status, json } = await callPlanningApi({
+      regionCode: "BUSAN",
+      festivalTypes: ["CULTURE_ART"],
+      venueType: "GREEN",
+      durationDays: 3,
+      planningYear: 2026,
+      referenceDataPolicy: "HISTORICAL_ONLY",
+      festivalName: "부산국제록페스티벌",
+    });
+
+    expect(status).toBe(200);
+    expect(json.seriesSignal.status).toBe("MATCHED");
+    expect(json.seriesSignal.matchMethod).toBe("EXACT");
+    expect(json.seriesSignal.canonicalName).toBe("부산국제록페스티벌");
+    expect(json.seriesSignal.historyCount).toBe(7);
+    // leakage-safe: planningYear=2026 자신의 record(2026)는 절대 포함되지 않는다.
+    expect(json.seriesSignal.historicalYears.every((y: number) => y < 2026)).toBe(true);
+    expect(json.estimateBasis).toBe("SERIES_HISTORY_MEDIAN"); // literal 이름 자체는 G0 도입 이후에도 유지(apply-planning-semantics.ts 참고 - UI gate로 쓰이는 literal이라 임의로 바꾸지 않음).
+    expect(json.estimatedBudgetKrw).toBe(json.seriesSignal.seriesEstimatedBudgetKrw);
+
+    // seriesHistoryDetail(assistant-tester 진단용 additive 필드) — 실제 DB 기준: 유효 7건 +
+    // 2022(budgetQualityFlag=MISSING_OR_NONPOSITIVE) 1건 제외 = 표시 8건.
+    expect(json.seriesHistoryDetail).not.toBeNull();
+    expect(json.seriesHistoryDetail.eligibleForSeriesCalculationCount).toBe(7);
+    expect(json.seriesHistoryDetail.excludedCount).toBe(1);
+    expect(json.seriesHistoryDetail.displayedRecordCount).toBe(8);
+    expect(json.seriesHistoryDetail.records.some((r: { datasetYear: number }) => r.datasetYear === 2026)).toBe(false);
+    const excluded2022 = json.seriesHistoryDetail.records.find((r: { datasetYear: number }) => r.datasetYear === 2022);
+    expect(excluded2022?.eligibleForSeriesCalculation).toBe(false);
+    expect(excluded2022?.exclusionReason).toBe("MISSING_OR_NONPOSITIVE");
+  });
+
+  /**
+   * PHASE G0 golden case — 부산국제록페스티벌(연구 문서의 대표 사례)이 실제 production route를
+   * 거쳐서도 정확히 LATEST 분기로 라우팅되고, 2025 record 하나만 point estimate source가 되며
+   * (나머지 6건은 "eligible이지만 point estimate source는 아님"), 2026 actual이 계산 input 어디에도
+   * 쓰이지 않는지 확인한다. estimatedBudgetKrw ≈ 72억(연구 재현값과 parity).
+   */
+  it("G0 golden case — 부산국제록페스티벌 planningYear=2026: latestHistoricalGap=1 → estimateSource=LATEST, estimatedBudgetKrw≈72억, 2025 record만 point estimate source", async () => {
+    const { status, json } = await callPlanningApi({
+      regionCode: "BUSAN",
+      festivalTypes: ["CULTURE_ART"],
+      venueType: "GREEN",
+      durationDays: 3,
+      planningYear: 2026,
+      referenceDataPolicy: "HISTORICAL_ONLY",
+      festivalName: "부산국제록페스티벌",
+    });
+
+    expect(status).toBe(200);
+    expect(json.seriesSignal.status).toBe("MATCHED");
+    expect(json.seriesSignal.latestHistoricalYear).toBe(2025);
+    expect(json.seriesSignal.latestHistoricalGap).toBe(1);
+    expect(json.seriesSignal.estimateSource).toBe("LATEST");
+    // 연구 문서 재현값과 parity(2025 record는 CPI base year 자신이라 무보정 - planningYear=2026 ->
+    // baseYear=2025 -> CPI[2025]/CPI[2025]=1).
+    expect(json.estimatedBudgetKrw).toBe(7_200_000_000);
+    expect(json.recommendedBudgetKrw).toBe(Math.round(7_200_000_000 * 1.05));
+
+    expect(json.seriesHistoryDetail.estimateSource).toBe("LATEST");
+    expect(json.seriesHistoryDetail.latestHistoricalYear).toBe(2025);
+    expect(json.seriesHistoryDetail.latestHistoricalGap).toBe(1);
+    // 2026 actual은 leakage-safe 재확인: history record 어디에도 2026이 없어야 한다.
+    expect(json.seriesHistoryDetail.records.every((r: { datasetYear: number }) => r.datasetYear < 2026)).toBe(true);
+
+    const record2025 = json.seriesHistoryDetail.records.find((r: { datasetYear: number }) => r.datasetYear === 2025);
+    expect(record2025?.eligibleForSeriesCalculation).toBe(true);
+    expect(record2025?.usedAsPointEstimateSource).toBe(true);
+
+    // 나머지 eligible record(2017/2018/2019/2021/2023/2024)는 "제외"가 아니라 "eligible이지만
+    // point estimate source는 아님" 상태여야 한다(10절 semantics 분리).
+    const otherEligible = json.seriesHistoryDetail.records.filter(
+      (r: { datasetYear: number; eligibleForSeriesCalculation: boolean }) => r.datasetYear !== 2025 && r.eligibleForSeriesCalculation
+    );
+    expect(otherEligible.length).toBe(6);
+    expect(otherEligible.every((r: { usedAsPointEstimateSource: boolean }) => r.usedAsPointEstimateSource === false)).toBe(true);
   });
 });
 

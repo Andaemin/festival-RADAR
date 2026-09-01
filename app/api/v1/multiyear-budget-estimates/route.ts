@@ -12,7 +12,10 @@ import { applySeriesPlanningSemantics } from "@/lib/multiyear-series/apply-plann
 import { getMultiYearDataRevision } from "@/lib/multiyear-series/data-revision";
 import { computePlanningReliability, EMPTY_FROZEN_SERIES_MODEL } from "@/lib/multiyear-series/reliability";
 import { getCachedFrozenSeriesModel, getCachedSeriesRecords, getCachedVolatilityThreshold } from "@/lib/multiyear-series/runtime-cache";
+import { buildSeriesHistoryDetail, SeriesHistoryDetailDto } from "@/lib/multiyear-series/series-history-detail";
+import { lookupTarget } from "@/lib/multiyear-series/series-lookup";
 import { computeSeriesSignal, SERIES_SIGNAL_NOT_REQUESTED, SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
+import { buildSyntheticTargetRecord } from "@/lib/multiyear-series/target-from-query";
 import { FrozenSeriesModel } from "@/lib/multiyear-series/types";
 
 /**
@@ -129,6 +132,10 @@ export async function POST(request: NextRequest) {
     let seriesSignal: SeriesSignalResponse = SERIES_SIGNAL_NOT_REQUESTED;
     let seriesModelForReliability: FrozenSeriesModel = EMPTY_FROZEN_SERIES_MODEL;
     let volatilityThreshold: number | null = null;
+    // assistant-tester 진단용 — Series MATCHED일 때 실제 계산에 쓰인 개별 historical record를
+    // 노출한다(seriesSignal의 매칭 판정을 재사용할 뿐, 새로 매칭하지 않는다). MATCHED가 아니면
+    // 항상 null - production 계산(estimatedBudgetKrw 등)에는 이 필드가 전혀 관여하지 않는다.
+    let seriesHistoryDetail: SeriesHistoryDetailDto | null = null;
     if (festivalName && dataRevision !== null) {
       const allSeriesRecords = await getCachedSeriesRecords(prisma, dataRevision);
       const model = await getCachedFrozenSeriesModel(allSeriesRecords, dataRevision, planningYear);
@@ -136,6 +143,30 @@ export async function POST(request: NextRequest) {
       seriesModelForReliability = model;
       const thresholdResult = await getCachedVolatilityThreshold(allSeriesRecords, dataRevision, planningYear);
       volatilityThreshold = thresholdResult.threshold;
+
+      if (seriesSignal.status === "MATCHED") {
+        const target = buildSyntheticTargetRecord({
+          festivalName,
+          region: query.region,
+          district: query.district,
+          typeTokens: query.typeTokens,
+          planningYear,
+        });
+        const lookup = lookupTarget(target, model);
+        // seriesSignal.status==="MATCHED"면 estimateSource/latestHistoricalYear는 항상 채워져
+        // 있다(own-history.ts가 VALID history가 있을 때만 MATCHED를 반환하므로) - re-derive하지
+        // 않고 이미 계산된 값을 그대로 넘긴다.
+        if (lookup.matchedGroupId !== null && seriesSignal.estimateSource !== undefined && seriesSignal.latestHistoricalYear !== undefined) {
+          seriesHistoryDetail = buildSeriesHistoryDetail(
+            lookup.matchedGroupId,
+            planningYear,
+            model,
+            allSeriesRecords,
+            seriesSignal.estimateSource,
+            seriesSignal.latestHistoricalYear
+          );
+        }
+      }
     }
 
     // PHASE 9C-C: Phase 9C-B에서 확정한 semantics를 순수 함수로 배선한다 - series MATCHED(+VALID
@@ -172,6 +203,9 @@ export async function POST(request: NextRequest) {
       rangeBasis: applied.rangeBasis,
       dataQualityBasis: applied.dataQualityBasis,
       seriesSignal,
+      // assistant-tester 진단용 additive 필드 — Series MATCHED일 때만 채워진다(그 외 null).
+      // production 계산 어디에서도 이 필드를 입력으로 읽지 않는다.
+      seriesHistoryDetail,
       // PHASE 19-B — additive 신규 필드. legacy dataQualityV3/confidence류와 이름·의미 모두
       // 분리된 사용자 신뢰도 표시용 필드(HIGH/MEDIUM/LOW + 설명 문구) - 기존 필드는 하나도
       // 지우거나 바꾸지 않았다.

@@ -11,6 +11,8 @@ import {
 } from "@/lib/api/multiyear-budget-estimates";
 import { resolveSeriesDisplayState, SERIES_FALLBACK_MESSAGE } from "@/lib/multiyear-series/planning-ui-display";
 import { buildSeriesSearchResultKey, type SeriesSearchResult } from "@/lib/multiyear-series/series-search";
+import type { SeriesHistoryDetailDto, SeriesHistoryExclusionReason } from "@/lib/multiyear-series/series-history-detail";
+import { quantile } from "@/lib/utils/weighted-statistics";
 
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_MIN_LENGTH = 2;
@@ -836,6 +838,12 @@ function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudget
             {seriesDisplay.kind === "SERIES_APPLIED" && (
                 <SeriesHistoryCard seriesDisplay={seriesDisplay} />
             )}
+
+            {/* Series 계산에 사용된 과거 축제 이력 — SERIES 경로일 때만(Peer에서는 표시하지 않음,
+                Peer는 아래 Top peer candidates 카드가 담당한다). */}
+            {seriesDisplay.kind === "SERIES_APPLIED" && result.seriesHistoryDetail && (
+                <SeriesHistoryDetailCard detail={result.seriesHistoryDetail} result={result} />
+            )}
             {(seriesDisplay.kind === "UNMATCHED" || seriesDisplay.kind === "AMBIGUOUS" || seriesDisplay.kind === "NO_VALID_HISTORY") && (
                 <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
                     ℹ️ {SERIES_FALLBACK_MESSAGE[seriesDisplay.kind]}
@@ -1064,6 +1072,156 @@ function SeriesHistoryCard({
             <p className="text-xs text-gray-500 mt-3">
                 동일 축제 이력 기반이어도 아래 &ldquo;Peer 통계&rdquo; 카드는 참고용으로 계속 함께 계산됩니다 — 최종 추정에는 쓰이지 않는 보조 비교입니다.
             </p>
+        </Card>
+    );
+}
+
+const EXCLUSION_REASON_LABEL: Record<SeriesHistoryExclusionReason, string> = {
+    MISSING_OR_NONPOSITIVE: "유효한 예산 정보 없음",
+    UNIT_SCALE_SUSPECT: "예산 단위 이상 의심",
+    MISSING_FEATURE: "지역/유형 정보 없음",
+};
+
+const ESTIMATE_SOURCE_LABEL: Record<"LATEST" | "MEDIAN", string> = {
+    LATEST: "최근 동일 축제 계획예산",
+    MEDIAN: "과거 동일 축제 예산 중앙값",
+};
+
+/**
+ * "동일 축제 과거 이력" — Series 계산(computeOwnHistorySignal)에 실제로 쓰인 개별 historical
+ * record를 표로 풀어 보여준다(표시 전용, 계산은 전혀 다시 하지 않는다). API가 이미 leakage-safe
+ * 필터/CPI all-or-nothing 규칙을 적용해 내려준 값을 그대로 렌더링만 한다.
+ *
+ * PHASE G0 — "eligibleForSeriesCalculation"(own-history eligibility를 통과해 이 series에 실제로
+ * 연결된 record)과 "usedAsPointEstimateSource"(그 record가 seriesEstimatedBudgetKrw 숫자에 직접
+ * 반영됐는가)를 분리해서 보여준다. LATEST 분기에서는 eligible record 중 딱 하나만 point estimate
+ * source이고, 나머지 eligible record는 "제외"가 아니라 "유효 이력(참고)"로 표시한다.
+ *
+ * 하단 parity checker는 estimateSource에 맞춰(LATEST면 해당 한 건, MEDIAN이면 eligible 전체의
+ * median) API estimatedBudgetKrw와 일치하는지만 확인한다(×1.05 추천 공식 검산은 이미 있는
+ * RecommendationCheckCard가 담당 - 여기서 중복하지 않는다).
+ */
+function SeriesHistoryDetailCard({ detail, result }: { detail: SeriesHistoryDetailDto; result: MultiYearBudgetEstimateResponse }) {
+    const eligibleRecords = detail.records.filter((r) => r.eligibleForSeriesCalculation);
+    const excludedRecords = detail.records.filter((r) => !r.eligibleForSeriesCalculation);
+    const pointEstimateRecords = detail.records.filter((r) => r.usedAsPointEstimateSource);
+    // cpiFullyAvailable=false면 own-history.ts가 point estimate 계산에 원본(nominal) 값을 그대로
+    // 썼다 - 여기서도 같은 값을 재계산에 써야 API 값과 일치한다(cpiAdjustedBudgetKrw는 이 경우
+    // 전부 null로 내려오므로 originalBudgetKrw를 대신 쓴다).
+    const pointEstimateValues = pointEstimateRecords.map((r) => (detail.cpiFullyAvailable ? r.cpiAdjustedBudgetKrw! : r.originalBudgetKrw!));
+    const computedEstimate =
+        pointEstimateValues.length === 0
+            ? null
+            : detail.estimateSource === "LATEST"
+                ? Math.round(pointEstimateValues[0])
+                : Math.round(quantile(pointEstimateValues, 0.5));
+    const estimateMatchesApi = computedEstimate !== null && computedEstimate === result.estimatedBudgetKrw;
+
+    return (
+        <Card title="동일 축제 과거 이력">
+            <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-900 mb-3">
+                추정 기준: <span className="font-semibold">{ESTIMATE_SOURCE_LABEL[detail.estimateSource]}</span>
+                {" · "}최근 이력: {detail.latestHistoricalYear}년{" · "}계획연도와 차이: {detail.latestHistoricalGap}년
+                {detail.estimateSource === "MEDIAN" && <span className="text-emerald-700"> — 최근 이력이 3년 이상 오래되어 중앙값을 사용했습니다.</span>}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <MiniStat label="확인된 과거 이력" value={`${detail.displayedRecordCount}회`} />
+                <MiniStat label="유효 이력" value={`${detail.eligibleForSeriesCalculationCount}회`} />
+                <MiniStat label="계산 제외" value={`${detail.excludedCount}회`} />
+                <MiniStat label="관측 연도 범위" value={`${detail.firstObservedYear}~${detail.lastObservedYear}`} />
+            </div>
+
+            {detail.excludedCount > 0 && (
+                <p className="text-xs text-amber-700 mb-2">
+                    ⚠ 확인된 과거 이력 {detail.displayedRecordCount}회 중 {detail.excludedCount}회는 예산 정보가 없거나 유효하지 않아 계산에서 제외됐습니다 — 아래 표에서 &ldquo;계산 사용 여부&rdquo;를 확인하세요.
+                </p>
+            )}
+
+            {!detail.cpiFullyAvailable && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 mb-3">
+                    ⓘ 이 계획연도 기준 CPI 값이 일부 연도에 없어(CPI 보정표 미보유), 이번 계산은 CPI 보정 없이 원본(nominal) 예산 그대로 추정했습니다 — 아래 &ldquo;CPI 보정 예산&rdquo; 열이 모든 행에서 비어 있는 것은 정상입니다(일부 행만 보정되지 않습니다).
+                </div>
+            )}
+
+            <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                <table className="w-full text-xs border-collapse">
+                    <thead className="sticky top-0 bg-white">
+                        <tr className="bg-gray-50">
+                            <th className="text-left px-2 py-1.5 border-b">연도</th>
+                            <th className="text-left px-2 py-1.5 border-b">당시 축제명</th>
+                            <th className="text-left px-2 py-1.5 border-b">지역/시군구</th>
+                            <th className="text-left px-2 py-1.5 border-b">축제유형</th>
+                            <th className="text-left px-2 py-1.5 border-b">장소유형</th>
+                            <th className="text-right px-2 py-1.5 border-b">개최기간</th>
+                            <th className="text-right px-2 py-1.5 border-b">당시 계획예산</th>
+                            <th className="text-right px-2 py-1.5 border-b">CPI 보정 예산</th>
+                            <th className="text-left px-2 py-1.5 border-b">계산 사용 여부</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {detail.records.map((r, i) => (
+                            <tr
+                                key={i}
+                                className={`border-b last:border-0 ${
+                                    r.usedAsPointEstimateSource ? "bg-emerald-50" : !r.eligibleForSeriesCalculation ? "bg-gray-50 text-gray-400" : ""
+                                }`}
+                            >
+                                <td className="px-2 py-1.5">{r.datasetYear}</td>
+                                <td className="px-2 py-1.5">{r.festivalName}</td>
+                                <td className="px-2 py-1.5">
+                                    {r.region ? REGION_DISPLAY[r.region] : "—"}{r.district ? `/${r.district}` : ""}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                    {r.festivalTypes.length > 0 ? r.festivalTypes.map((t) => FESTIVAL_TYPE_DISPLAY[t]).join("/") : "—"}
+                                </td>
+                                <td className="px-2 py-1.5">{r.venueType ? VENUE_TYPE_DISPLAY[r.venueType] : "—"}</td>
+                                <td className="px-2 py-1.5 text-right">{r.durationDays !== null ? `${r.durationDays}일` : "정보 없음"}</td>
+                                <td className="px-2 py-1.5 text-right">{r.originalBudgetKrw !== null ? fmt(r.originalBudgetKrw) : "정보 없음"}</td>
+                                <td className="px-2 py-1.5 text-right">
+                                    {r.eligibleForSeriesCalculation ? (r.cpiAdjustedBudgetKrw !== null ? fmt(r.cpiAdjustedBudgetKrw) : "— (nominal 사용)") : "—"}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                    {r.usedAsPointEstimateSource ? (
+                                        <span className="text-emerald-700 font-semibold">✓ 예상 예산 기준값</span>
+                                    ) : r.eligibleForSeriesCalculation ? (
+                                        <span className="text-gray-600">유효 이력(참고)</span>
+                                    ) : (
+                                        <span className="text-gray-500">제외 ({EXCLUSION_REASON_LABEL[r.exclusionReason!]})</span>
+                                    )}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            <p className="text-[11px] text-gray-400 mt-2">
+                개최기간은 참고 정보이며 현재 Series 예상/추천 예산 산식(×1.05)에는 직접 사용되지 않습니다 — 표에 기간이 보인다고 duration이 반영된 것은 아닙니다.
+            </p>
+            {detail.estimateSource === "LATEST" && eligibleRecords.length > pointEstimateRecords.length && (
+                <p className="text-[11px] text-gray-400 mt-1">
+                    &ldquo;유효 이력(참고)&rdquo; 행은 own-history 계산 대상에서 제외된 것이 아닙니다 — 최근 이력(gap≤2년)을 기준값으로 쓰는 경우에도 나머지 유효 이력은 참고용으로 계속 표시됩니다.
+                </p>
+            )}
+            {excludedRecords.length > 0 && (
+                <p className="text-[11px] text-gray-400 mt-1">
+                    제외된 record는 이 series의 유효 record들과 지역·시군구·정규화된 축제명이 같은 원본 데이터 중 계산 대상에서 걸러진 것을 최선의 근사치로 보여줍니다(회차/연도 표기 차이는 정규화 후 비교) — series 매칭 판정 자체를 다시 내린 것은 아닙니다.
+                </p>
+            )}
+
+            <div className="mt-3 pt-3 border-t border-gray-100">
+                <p className="text-[11px] font-semibold text-gray-400 mb-1.5">estimate parity 검증 (표시 전용)</p>
+                <div className="font-mono text-xs bg-gray-50 rounded p-3 flex flex-col gap-0.5">
+                    <div>
+                        {detail.estimateSource === "LATEST" ? "예상 예산 기준값(최근 이력)" : `계산에 사용된 ${detail.cpiFullyAvailable ? "CPI 보정" : "원본(nominal)"} 예산 ${pointEstimateValues.length}건의 median`}
+                    </div>
+                    <div>→ {computedEstimate !== null ? fmt(computedEstimate) : "—"} <span className="text-gray-400">(표 기준 재계산값)</span></div>
+                    <div className="pt-1 border-t mt-1">API 예상 예산(estimatedBudgetKrw) = {fmt(result.estimatedBudgetKrw)}</div>
+                    <div>일치 = {estimateMatchesApi ? "✓" : "✗"}</div>
+                    <div className="text-gray-400 mt-1">추천 계획 예산(× 1.05) 검산은 위 &ldquo;추천 공식 검증&rdquo; 카드를 참고하세요.</div>
+                </div>
+            </div>
         </Card>
     );
 }

@@ -1,5 +1,5 @@
 import { FestivalType, Region } from "@/lib/domain/enums";
-import { computeOwnHistorySignal } from "./own-history";
+import { computeOwnHistorySignal, SeriesEstimateSource } from "./own-history";
 import { lookupTarget } from "./series-lookup";
 import { buildSyntheticTargetRecord } from "./target-from-query";
 import { FrozenSeriesModel, MatchMethod } from "./types";
@@ -24,6 +24,11 @@ export interface SeriesSignalResponse {
   historicalYears?: number[];
   latestHistoricalYear?: number;
   seriesEstimatedBudgetKrw?: number;
+  /** PHASE G0 — planningYear - latestHistoricalYear. MATCHED(+VALID history)일 때만 채워진다. */
+  latestHistoricalGap?: number;
+  /** PHASE G0 — seriesEstimatedBudgetKrw가 최근 comparable budget(LATEST, gap<=2)에서 왔는지
+   *  기존 median(MEDIAN, gap>=3, 로직 무변경)에서 왔는지. MATCHED(+VALID history)일 때만 채워진다. */
+  estimateSource?: SeriesEstimateSource;
 }
 
 export const SERIES_SIGNAL_NOT_REQUESTED: SeriesSignalResponse = { status: "NOT_REQUESTED" };
@@ -65,5 +70,7 @@ export function computeSeriesSignal(
     historicalYears: signal.historicalYears,
     latestHistoricalYear: signal.latestHistoricalYear ?? undefined,
     seriesEstimatedBudgetKrw: signal.seriesEstimatedBudget,
+    latestHistoricalGap: signal.latestHistoricalGap ?? undefined,
+    estimateSource: signal.estimateSource ?? undefined,
   };
 }

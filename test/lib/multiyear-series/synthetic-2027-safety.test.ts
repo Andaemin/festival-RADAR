@@ -46,8 +46,14 @@ describe("2027 synthetic safety - CPI[2026] 부재 상황에서 전체 파이프
     const signal = computeSeriesSignal("제4회 가나다축제", REGION, null, TYPES, 2027, model);
     expect(signal.status).toBe("MATCHED");
     expect(signal.seriesEstimatedBudgetKrw).toBeDefined();
-    // nominal fallback: CPI 미적용이므로 [100M,120M,150M]의 median=120M 그대로.
-    expect(signal.seriesEstimatedBudgetKrw).toBe(120_000_000);
+    // PHASE G0 — latestHistoricalYear=2026, planningYear=2027 -> gap=1 <= 2 -> LATEST 분기.
+    // CPI[2026]이 없어 nominal fallback이므로 latestComparableBudgetKrw는 2026 record의 nominal
+    // 값(150M) 그대로다 - median(120M)이 아니다. nominal fallback이 LATEST/MEDIAN 어느 분기에서든
+    // 예외 없이 동작하는지가 이 테스트의 목적이므로, G0 도입에 맞춰 기대값을 갱신한다(정확도를
+    // 주장하는 테스트가 아니다 - 파일 상단 설명 참고).
+    expect(signal.latestHistoricalGap).toBe(1);
+    expect(signal.estimateSource).toBe("LATEST");
+    expect(signal.seriesEstimatedBudgetKrw).toBe(150_000_000);
   });
 
   it("recommendation: CPI 미적용 여부와 무관하게 고정 +5% buffer가 예외 없이 적용된다", () => {

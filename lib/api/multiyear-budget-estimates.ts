@@ -3,6 +3,7 @@ import type { EstimateBasis, RecommendationBasis, RangeBasis, DataQualityBasis }
 import type { PlanningReliabilityTier } from "@/lib/multiyear-series/reliability";
 import type { SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
 import type { SeriesSearchResult } from "@/lib/multiyear-series/series-search";
+import type { SeriesHistoryDetailDto } from "@/lib/multiyear-series/series-history-detail";
 
 export interface MultiYearYearWeightShareDto {
     year: number;
@@ -66,6 +67,9 @@ export interface MultiYearBudgetEstimateResponse {
     dataQualityBasis: DataQualityBasis;
     /** PHASE 9C-A — festivalName 미입력 시 항상 { status: "NOT_REQUESTED" }. */
     seriesSignal: SeriesSignalResponse;
+    /** assistant-tester 진단용 — seriesSignal.status==="MATCHED"일 때만 채워진다(그 외 null).
+     *  production 계산에는 관여하지 않는다(표시 전용). */
+    seriesHistoryDetail: SeriesHistoryDetailDto | null;
     /** PHASE 19-B — 신규 additive 필드. HIGH(=SERIES_STABLE)/MEDIUM(=SERIES_VOLATILE)/
      *  LOW(=PEER_FALLBACK) - legacy confidence/dataQualityV3와 완전히 독립적으로 계산된다
      *  (computePlanningReliability, lib/multiyear-series/reliability.ts). */
