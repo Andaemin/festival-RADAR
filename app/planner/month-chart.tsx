@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MayoCard, MayoBtn, MayoTable } from "mayoui-react";
 import type { MonthDistributionEntry } from "@/lib/planner/types";
 
 /**
@@ -15,10 +16,6 @@ import type { MonthDistributionEntry } from "@/lib/planner/types";
 
 const SERIES = "#2a78d6";
 const CRITICAL = "#d03b3b";
-const MUTED = "#898781";
-const GRIDLINE = "#e1e0d9";
-const BASELINE = "#c3c2b7";
-const TEXT_SECONDARY = "#52514e";
 
 interface Props {
     distribution: MonthDistributionEntry[];
@@ -44,57 +41,45 @@ export default function MonthChart({
     const hoveredEntry = distribution.find((d) => d.month === hovered) ?? null;
 
     return (
-        <section className="bg-white rounded-xl shadow p-6">
+        <MayoCard variant="outlined" padding="md">
             <div className="flex items-start justify-between gap-4 mb-1">
-                <h2 className="text-base font-bold">
+                <h2 className="text-base font-bold" style={{ color: "var(--mayo-text)" }}>
                     월별 경쟁 축제 수 — {regionLabel} {typeLabel}
                 </h2>
-                <button
-                    type="button"
-                    onClick={() => setShowTable((v) => !v)}
-                    className="text-xs underline shrink-0"
-                    style={{ color: TEXT_SECONDARY }}
-                >
+                <MayoBtn variant="ghost" size="sm" onClick={() => setShowTable((v) => !v)}>
                     {showTable ? "차트로 보기" : "표로 보기"}
-                </button>
+                </MayoBtn>
             </div>
-            <p className="text-xs mb-5" style={{ color: TEXT_SECONDARY }}>
+            <p className="text-xs mb-5" style={{ color: "var(--mayo-text-muted)" }}>
                 막대는 같은 지역·같은 유형 축제 건수입니다. 막대에 마우스를 올리면 전국 건수도 볼 수 있습니다.
             </p>
 
             {showTable ? (
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
-                        <thead>
-                            <tr className="text-left" style={{ color: TEXT_SECONDARY }}>
-                                <th className="py-2 pr-4 font-medium">월</th>
-                                <th className="py-2 pr-4 font-medium">{regionLabel} 동일유형</th>
-                                <th className="py-2 pr-4 font-medium">{regionLabel} 전체</th>
-                                <th className="py-2 font-medium">전국 전체</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {distribution.map((d) => (
-                                <tr key={d.month} className="border-t" style={{ borderColor: GRIDLINE }}>
-                                    <td className="py-2 pr-4">
-                                        {d.month}월
-                                        {d.month === targetMonth && " (희망)"}
-                                        {d.month === recommendedMonth && " (추천)"}
-                                    </td>
-                                    <td className="py-2 pr-4 font-medium">{d.regionSameTypeCount}</td>
-                                    <td className="py-2 pr-4">{d.regionCount}</td>
-                                    <td className="py-2">{d.nationalCount}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                <MayoTable
+                    columns={[
+                        { key: "month", label: "월", width: 100, render: (_v: unknown, row: Record<string, unknown>) => `${row.month}월${row.target ? " (희망)" : ""}${row.recommended ? " (추천)" : ""}` },
+                        { key: "regionSameTypeCount", label: `${regionLabel} 동일유형`, sortable: true },
+                        { key: "regionCount", label: `${regionLabel} 전체`, sortable: true },
+                        { key: "nationalCount", label: "전국 전체", sortable: true },
+                    ]}
+                    data={distribution.map((d) => ({
+                        month: d.month,
+                        regionSameTypeCount: d.regionSameTypeCount,
+                        regionCount: d.regionCount,
+                        nationalCount: d.nationalCount,
+                        target: d.month === targetMonth,
+                        recommended: d.month === recommendedMonth,
+                    }))}
+                    rowKey="month"
+                    striped
+                    bordered
+                />
             ) : (
                 <div className="relative">
                     {hoveredEntry && (
                         <div
                             className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 rounded-lg px-3 py-2 text-xs shadow-lg pointer-events-none"
-                            style={{ background: "#0b0b0b", color: "#ffffff" }}
+                            style={{ background: "var(--mayo-bg-muted)", color: "var(--mayo-text)", boxShadow: "var(--mayo-shadow-md)" }}
                         >
                             <div className="font-bold mb-1">{hoveredEntry.month}월</div>
                             <div>
@@ -107,7 +92,7 @@ export default function MonthChart({
                         </div>
                     )}
 
-                    <div className="flex items-end gap-[2px] h-44 pt-6" style={{ borderBottom: `1px solid ${BASELINE}` }}>
+                    <div className="flex items-end gap-[2px] h-44 pt-6" style={{ borderBottom: "1px solid var(--mayo-border)" }}>
                         {distribution.map((d) => {
                             const isTarget = d.month === targetMonth;
                             const isRecommended = d.month === recommendedMonth;
@@ -123,7 +108,7 @@ export default function MonthChart({
                                     {d.regionSameTypeCount > 0 && (
                                         <span
                                             className="text-[10px] font-medium mb-1"
-                                            style={{ color: TEXT_SECONDARY }}
+                                            style={{ color: "var(--mayo-text-muted)" }}
                                         >
                                             {d.regionSameTypeCount}
                                         </span>
@@ -149,7 +134,7 @@ export default function MonthChart({
                             <div
                                 key={d.month}
                                 className="flex-1 text-center text-[10px]"
-                                style={{ color: MUTED }}
+                                style={{ color: "var(--mayo-text-muted)" }}
                             >
                                 {d.month}
                             </div>
@@ -157,7 +142,7 @@ export default function MonthChart({
                     </div>
 
                     {/* 색만으로 의미를 전달하지 않도록 라벨을 함께 둔다. */}
-                    <div className="flex flex-wrap gap-x-5 gap-y-1 mt-4 text-xs" style={{ color: TEXT_SECONDARY }}>
+                    <div className="flex flex-wrap gap-x-5 gap-y-1 mt-4 text-xs" style={{ color: "var(--mayo-text-muted)" }}>
                         {targetMonth && (
                             <span className="flex items-center gap-1.5">
                                 <span className="w-3 h-3 rounded-sm inline-block" style={{ background: CRITICAL }} />
@@ -176,6 +161,6 @@ export default function MonthChart({
                     </div>
                 </div>
             )}
-        </section>
+        </MayoCard>
     );
 }

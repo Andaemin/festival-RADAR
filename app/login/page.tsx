@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { MayoBtn, MayoInput } from "mayoui-react";
+import { MayoBtn, MayoInput, MayoCard } from "mayoui-react";
 import { login } from "@/lib/api/auth";
 
 export default function LoginPage() {
@@ -30,33 +30,35 @@ export default function LoginPage() {
     }
 
     return (
-        <main className="min-h-screen flex items-center justify-center bg-gray-50">
-            <div className="w-full max-w-sm bg-white rounded-2xl shadow-md p-8">
-                <h1 className="text-2xl font-bold text-center mb-1">축제레이더</h1>
-                <p className="text-sm text-gray-500 text-center mb-8">지역 축제 혼잡도 예측 서비스</p>
+        <main className="min-h-screen flex items-center justify-center" style={{ background: "var(--mayo-bg-subtle)" }}>
+            <MayoCard variant="outlined" padding="lg">
+                <div className="w-full max-w-sm">
+                    <h1 className="text-2xl font-bold text-center mb-1" style={{ color: "var(--mayo-text)" }}>축제레이더</h1>
+                    <p className="text-sm text-center mb-8" style={{ color: "var(--mayo-text-muted)" }}>지역 축제 혼잡도 예측 서비스</p>
 
-                <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-                    <MayoInput
-                        label="아이디"
-                        type="text"
-                        placeholder="아이디를 입력하세요"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        error={error ? " " : undefined}
-                    />
-                    <MayoInput
-                        label="비밀번호"
-                        type="password"
-                        placeholder="비밀번호를 입력하세요"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        error={error || undefined}
-                    />
-                    <MayoBtn type="submit" variant="primary" size="md" disabled={loading}>
-                        {loading ? "로그인 중..." : "로그인"}
-                    </MayoBtn>
-                </form>
-            </div>
+                    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                        <MayoInput
+                            label="아이디"
+                            type="text"
+                            placeholder="아이디를 입력하세요"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            error={error ? " " : undefined}
+                        />
+                        <MayoInput
+                            label="비밀번호"
+                            type="password"
+                            placeholder="비밀번호를 입력하세요"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            error={error || undefined}
+                        />
+                        <MayoBtn type="submit" variant="primary" size="md" disabled={loading}>
+                            {loading ? "로그인 중..." : "로그인"}
+                        </MayoBtn>
+                    </form>
+                </div>
+            </MayoCard>
         </main>
     );
 }

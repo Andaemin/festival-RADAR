@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FestivalType, Region, VenueType } from "@/lib/domain/enums";
-import { computeMissingRequiredFields, isDurationValid, shouldResetMetadataOnNameEdit } from "@/app/assistant-tester/page";
+import { computeMissingRequiredFields, isDurationValid, shouldResetMetadataOnNameEdit } from "@/app/budget-estimator/page";
 import type { SeriesSearchResult } from "@/lib/multiyear-series/series-search";
 
 /**

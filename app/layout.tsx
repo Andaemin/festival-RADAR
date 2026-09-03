@@ -25,7 +25,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
     return (
         <html lang="ko" className={`${pretendard.variable} ${tossface.variable} h-full antialiased`}>
-            <body className="min-h-full flex font-[family-name:var(--font-pretendard)]">
+            <body className="min-h-full flex">
                 <AppSidebar />
                 <main className="flex-1 min-h-screen overflow-auto">
                     {children}

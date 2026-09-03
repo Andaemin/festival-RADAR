@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MayoBtn } from "mayoui-react";
+import {
+    MayoBtn,
+    MayoSelect,
+    MayoInput,
+    MayoToggle,
+    MayoCard,
+    MayoAlert,
+    MayoBadge,
+    MayoTable,
+    MayoLoadingSpinner,
+} from "mayoui-react";
 import type { MetadataResponse } from "@/lib/domain/types";
 import {
     fetchPlanDraft,
@@ -48,6 +58,18 @@ function period(start: string | null, end: string | null): string | null {
         : `${dot(start)}~${dot(end)}`;
 }
 
+type RefRow = {
+    _key: string;
+    festivalName: string;
+    venueDetail: React.ReactNode;
+    regionLabel: string;
+    startMonth: string;
+    durationDays: string;
+    totalBudgetKrw: string;
+    visitors: string;
+    costPerVisitorKrw: string;
+};
+
 function ReferenceTable({
     items,
     venues,
@@ -57,56 +79,61 @@ function ReferenceTable({
     venues: Record<string, FestivalVenueInfo>;
 }) {
     if (items.length === 0) return null;
+
+    const tableData: RefRow[] = items.map((f, i) => {
+        const venue = venues[f.festivalName];
+        const actualPeriod = venue ? period(venue.startDate, venue.endDate) : null;
+        return {
+            _key: `${f.festivalName}-${i}`,
+            festivalName: f.festivalName,
+            venueDetail: (venue?.venue || actualPeriod) ? (
+                <span className="block text-xs mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
+                    {venue?.venue}
+                    {venue?.venue && actualPeriod ? " · " : ""}
+                    {actualPeriod}
+                </span>
+            ) : null,
+            regionLabel: `${f.regionLabel}${f.district ? ` ${f.district}` : ""}`,
+            startMonth: f.startMonth === null ? "미상" : `${f.startMonth}월`,
+            durationDays: num(f.durationDays, "일"),
+            totalBudgetKrw: krw(f.totalBudgetKrw),
+            visitors: num(f.visitors, "명"),
+            costPerVisitorKrw: krw(f.costPerVisitorKrw),
+        };
+    });
+
+    const columns: import("mayoui-react").MayoTableColumn<RefRow>[] = [
+        {
+            key: "festivalName",
+            label: "축제명",
+            render: (_val, row) => (
+                <span>
+                    {row.festivalName}
+                    {row.venueDetail}
+                </span>
+            ),
+        },
+        { key: "regionLabel", label: "지역" },
+        { key: "startMonth", label: "시기" },
+        { key: "durationDays", label: "기간" },
+        { key: "totalBudgetKrw", label: "예산" },
+        { key: "visitors", label: "방문객" },
+        { key: "costPerVisitorKrw", label: "1인당" },
+    ];
+
     return (
-        <div className="border-t border-gray-200 pt-3 mt-4 overflow-x-auto">
-            <p className="text-xs font-medium text-gray-500 mb-2">근거 축제 (실제 데이터)</p>
-            <table className="w-full text-sm border-collapse min-w-[520px]">
-                <thead>
-                    <tr className="text-left text-gray-500">
-                        <th className="py-1.5 pr-3 font-medium">축제명</th>
-                        <th className="py-1.5 pr-3 font-medium">지역</th>
-                        <th className="py-1.5 pr-3 font-medium">시기</th>
-                        <th className="py-1.5 pr-3 font-medium">기간</th>
-                        <th className="py-1.5 pr-3 font-medium text-right">예산</th>
-                        <th className="py-1.5 pr-3 font-medium text-right">방문객</th>
-                        <th className="py-1.5 font-medium text-right">1인당</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {items.map((f, i) => {
-                        const venue = venues[f.festivalName];
-                        const actualPeriod = venue ? period(venue.startDate, venue.endDate) : null;
-                        return (
-                        <tr key={`${f.festivalName}-${i}`} className="border-t border-gray-100">
-                            <td className="py-1.5 pr-3">
-                                {f.festivalName}
-                                {/* 표준데이터에서 찾은 실제 개최 정보. 못 찾으면 아무것도 안 나온다 */}
-                                {(venue?.venue || actualPeriod) && (
-                                    <span className="block text-xs text-gray-500 mt-0.5">
-                                        {venue?.venue}
-                                        {venue?.venue && actualPeriod ? " · " : ""}
-                                        {actualPeriod}
-                                    </span>
-                                )}
-                            </td>
-                            <td className="py-1.5 pr-3 text-gray-600">
-                                {f.regionLabel}
-                                {f.district ? ` ${f.district}` : ""}
-                            </td>
-                            <td className="py-1.5 pr-3 text-gray-600">
-                                {f.startMonth === null ? "미상" : `${f.startMonth}월`}
-                            </td>
-                            <td className="py-1.5 pr-3 text-gray-600">{num(f.durationDays, "일")}</td>
-                            <td className="py-1.5 pr-3 text-right">{krw(f.totalBudgetKrw)}</td>
-                            <td className="py-1.5 pr-3 text-right">{num(f.visitors, "명")}</td>
-                            <td className="py-1.5 text-right">{krw(f.costPerVisitorKrw)}</td>
-                        </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
+        <div className="pt-3 mt-4" style={{ borderTop: "1px solid var(--mayo-border)" }}>
+            <p className="text-xs font-medium mb-2" style={{ color: "var(--mayo-text-muted)" }}>근거 축제 (실제 데이터)</p>
+            <div className="overflow-x-auto" style={{ minWidth: 520 }}>
+                <MayoTable<RefRow>
+                    columns={columns}
+                    data={tableData}
+                    rowKey="_key"
+                    bordered
+                />
+            </div>
             {items.some((f) => venues[f.festivalName]) && (
-                <p className="text-[11px] text-gray-400 mt-2">
+                <p className="text-[11px] mt-2" style={{ color: "var(--mayo-text-muted)" }}>
                     회색 줄은 전국문화축제표준데이터의 실제 개최 장소·기간입니다.
                 </p>
             )}
@@ -211,170 +238,153 @@ export default function PlannerPage() {
     const typeLabel =
         metadata?.festivalTypes.find((t) => t.code === festivalType)?.displayName ?? festivalType;
 
+    const monthOptions = [
+        { value: "", label: "미정 — 추천받기" },
+        ...Array.from({ length: 12 }, (_, i) => ({
+            value: String(i + 1),
+            label: `${i + 1}월`,
+        })),
+    ];
+
+    const regionOptions = (metadata?.regions ?? []).map((r) => ({
+        value: r.code,
+        label: r.displayName,
+    }));
+
+    const districtOptions = [
+        { value: "", label: "전체" },
+        ...districts.map((d) => ({ value: d, label: d })),
+    ];
+
+    const festivalTypeOptions = (metadata?.festivalTypes ?? []).map((t) => ({
+        value: t.code,
+        label: t.displayName,
+    }));
+
+    const venueTypeOptions = (metadata?.venueTypes ?? []).map((v) => ({
+        value: v.code,
+        label: v.displayName,
+    }));
+
     return (
-        <main className="min-h-screen bg-gray-50 p-8 text-gray-900">
+        <main
+            className="min-h-screen p-8"
+            style={{ background: "var(--mayo-bg-subtle)", color: "var(--mayo-text)" }}
+        >
             <div className="max-w-4xl mx-auto">
                 <h1 className="text-2xl font-bold mb-1">축제 기획 추천</h1>
-                <p className="text-sm text-gray-600 mb-6">
+                <p className="text-sm mb-6" style={{ color: "var(--mayo-text-secondary)" }}>
                     전국 축제 개최 데이터를 분석해, <strong>전국에서는 검증됐지만 우리 지역에는 없는</strong>{" "}
                     선택지를 찾아 차별화 방향을 제안합니다. 모든 수치는 실제 데이터에서 계산됩니다.
                 </p>
 
                 {metaError && (
-                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                        메타데이터를 불러오지 못했습니다: {metaError}
+                    <div className="mb-4">
+                        <MayoAlert type="error" title="메타데이터 오류">
+                            메타데이터를 불러오지 못했습니다: {metaError}
+                        </MayoAlert>
                     </div>
                 )}
 
-                <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow p-6 mb-6">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">기획연도</label>
-                            <input
+                <MayoCard variant="outlined" padding="md" className="mb-6">
+                    <form onSubmit={handleSubmit}>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                            <MayoInput
+                                label="기획연도"
                                 type="number"
-                                className="border rounded px-3 py-2 text-sm"
+                                size="md"
                                 min={CURRENT_YEAR}
                                 value={planningYear}
                                 onChange={(e) => setPlanningYear(Number(e.target.value))}
                             />
-                        </div>
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">
-                                희망 개최월 <span className="text-gray-500 font-normal">(선택)</span>
-                            </label>
-                            <select
-                                className="border rounded px-3 py-2 text-sm"
-                                value={startMonth}
+                            <MayoSelect
+                                label="희망 개최월 (선택)"
+                                size="md"
+                                options={monthOptions}
+                                value={String(startMonth)}
                                 onChange={(e) =>
                                     setStartMonth(e.target.value === "" ? "" : Number(e.target.value))
                                 }
-                            >
-                                <option value="">미정 — 추천받기</option>
-                                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
-                                    <option key={m} value={m}>
-                                        {m}월
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                            />
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">광역자치단체</label>
-                            <select
-                                className="border rounded px-3 py-2 text-sm"
+                            <MayoSelect
+                                label="광역자치단체"
+                                size="md"
+                                options={regionOptions}
                                 value={regionCode}
                                 onChange={(e) => {
                                     setRegionCode(e.target.value);
                                     setDistrict("");
                                 }}
-                            >
-                                {metadata?.regions.map((r) => (
-                                    <option key={r.code} value={r.code}>
-                                        {r.displayName}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                            />
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">
-                                시군구 <span className="text-gray-500 font-normal">(선택)</span>
-                            </label>
-                            <select
-                                className="border rounded px-3 py-2 text-sm"
+                            <MayoSelect
+                                label="시군구 (선택)"
+                                size="md"
+                                options={districtOptions}
                                 value={district}
                                 onChange={(e) => setDistrict(e.target.value)}
-                            >
-                                <option value="">전체</option>
-                                {districts.map((d) => (
-                                    <option key={d} value={d}>
-                                        {d}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                            />
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">축제 유형</label>
-                            <select
-                                className="border rounded px-3 py-2 text-sm"
+                            <MayoSelect
+                                label="축제 유형"
+                                size="md"
+                                options={festivalTypeOptions}
                                 value={festivalType}
                                 onChange={(e) => setFestivalType(e.target.value)}
-                            >
-                                {metadata?.festivalTypes.map((t) => (
-                                    <option key={t.code} value={t.code}>
-                                        {t.displayName}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                            />
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">장소 유형</label>
-                            <select
-                                className="border rounded px-3 py-2 text-sm"
+                            <MayoSelect
+                                label="장소 유형"
+                                size="md"
+                                options={venueTypeOptions}
                                 value={venueType}
                                 onChange={(e) => setVenueType(e.target.value)}
-                            >
-                                {metadata?.venueTypes.map((v) => (
-                                    <option key={v.code} value={v.code}>
-                                        {v.displayName}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
+                            />
 
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">
-                                개최 일수
-                                {metadata && (
-                                    <span className="text-gray-500 font-normal">
-                                        {" "}
-                                        (최소 {metadata.duration.minimum}일)
-                                    </span>
-                                )}
-                            </label>
-                            <input
+                            <MayoInput
+                                label={`개최 일수${metadata ? ` (최소 ${metadata.duration.minimum}일)` : ""}`}
                                 type="number"
-                                className="border rounded px-3 py-2 text-sm"
+                                size="md"
                                 min={metadata?.duration.minimum ?? 1}
                                 value={durationDays}
                                 onChange={(e) => setDurationDays(Number(e.target.value))}
                             />
-                        </div>
 
-                        <div className="flex items-end">
-                            <label className="flex items-center gap-2 text-sm pb-2">
-                                <input
-                                    type="checkbox"
+                            <div className="flex items-end pb-1">
+                                <MayoToggle
                                     checked={useLlm}
-                                    onChange={(e) => setUseLlm(e.target.checked)}
+                                    onChange={(checked) => setUseLlm(checked)}
+                                    label="AI 기획안 초안도 함께 생성"
+                                    size="md"
+                                    color="blue"
                                 />
-                                AI 기획안 초안도 함께 생성
-                            </label>
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="mt-5">
-                        <MayoBtn type="submit" variant="primary" size="md" disabled={loading || !metadata}>
-                            {loading ? "분석 중..." : "추천 받기"}
-                        </MayoBtn>
-                    </div>
-                </form>
+                        <div className="mt-5">
+                            <MayoBtn type="submit" variant="primary" size="md" disabled={loading || !metadata}>
+                                {loading ? "분석 중..." : "추천 받기"}
+                            </MayoBtn>
+                        </div>
+                    </form>
+                </MayoCard>
 
                 {error && (
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-6">
-                        {error}
+                    <div className="mb-6">
+                        <MayoAlert type="error">
+                            {error}
+                        </MayoAlert>
                     </div>
                 )}
 
                 {result && (
                     <div className="flex flex-col gap-6">
                         {/* 코호트 요약 */}
-                        <section className="bg-white rounded-xl shadow p-6">
+                        <MayoCard variant="outlined" padding="md">
                             <h2 className="text-base font-bold mb-1">분석 기준</h2>
-                            <p className="text-xs text-gray-500 mb-4">
+                            <p className="text-xs mb-4" style={{ color: "var(--mayo-text-muted)" }}>
                                 {result.datasetYearRange[0] === result.datasetYearRange[1]
                                     ? `${result.datasetYear}년`
                                     : `${result.datasetYearRange[0]}~${result.datasetYearRange[1]}년`}{" "}
@@ -387,34 +397,34 @@ export default function PlannerPage() {
                                     { label: `${regionLabel} ${typeLabel}`, value: result.cohort.regionSameType },
                                     { label: "동일 유형·장소", value: result.cohort.regionSameTypeSameVenue },
                                 ].map((s) => (
-                                    <div key={s.label}>
+                                    <MayoCard key={s.label} variant="outlined" padding="sm">
                                         <div className="text-2xl font-bold">{s.value}</div>
-                                        <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
-                                    </div>
+                                        <div className="text-xs mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>{s.label}</div>
+                                    </MayoCard>
                                 ))}
                             </div>
-                        </section>
+                        </MayoCard>
 
                         {/* 포화도 */}
                         {result.saturation && (
-                            <div
-                                className={`p-4 rounded-lg border text-sm ${
+                            <MayoAlert
+                                type={
                                     result.saturation.level === "HIGH"
-                                        ? "bg-red-50 border-red-200 text-red-800"
+                                        ? "error"
                                         : result.saturation.level === "MEDIUM"
-                                          ? "bg-amber-50 border-amber-200 text-amber-900"
-                                          : "bg-blue-50 border-blue-200 text-blue-900"
-                                }`}
+                                          ? "warning"
+                                          : "info"
+                                }
+                                title={
+                                    result.saturation.level === "HIGH"
+                                        ? "포화 위험 높음"
+                                        : result.saturation.level === "MEDIUM"
+                                          ? "포화 주의"
+                                          : "포화도 낮음"
+                                }
                             >
-                                <p className="font-medium mb-1">
-                                    {result.saturation.level === "HIGH"
-                                        ? "⚠ 포화 위험 높음"
-                                        : result.saturation.level === "MEDIUM"
-                                          ? "· 포화 주의"
-                                          : "· 포화도 낮음"}
-                                </p>
-                                <p>{result.saturation.message}</p>
-                            </div>
+                                {result.saturation.message}
+                            </MayoAlert>
                         )}
 
                         {/* 월별 분포 */}
@@ -433,32 +443,34 @@ export default function PlannerPage() {
                             </h2>
 
                             {result.recommendations.length === 0 && (
-                                <p className="text-sm text-gray-600">
+                                <p className="text-sm" style={{ color: "var(--mayo-text-secondary)" }}>
                                     조건에 맞는 추천이 없습니다. 지역이나 유형을 넓혀보세요.
                                 </p>
                             )}
 
                             {result.recommendations.map((rec) => (
-                                <article key={rec.id} className="bg-white rounded-xl shadow p-6">
+                                <MayoCard key={rec.id} variant="outlined" padding="md">
                                     <div className="flex items-start justify-between gap-4 mb-2">
                                         <div>
-                                            <span className="inline-block text-[11px] font-medium px-2 py-0.5 rounded bg-gray-100 text-gray-600 mb-2">
-                                                {KIND_BADGE[rec.kind]}
-                                            </span>
+                                            <div className="mb-2">
+                                                <MayoBadge color="gray" variant="soft" size="sm">
+                                                    {KIND_BADGE[rec.kind]}
+                                                </MayoBadge>
+                                            </div>
                                             <h3 className="font-bold">{rec.title}</h3>
                                         </div>
                                         {rec.kind !== "BUDGET_EFFICIENCY" && (
                                             <div className="text-right shrink-0">
                                                 <div className="text-xl font-bold">{rec.opportunityScore}</div>
-                                                <div className="text-[10px] text-gray-500">기회점수</div>
+                                                <div className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>기회점수</div>
                                             </div>
                                         )}
                                     </div>
 
-                                    <p className="text-sm text-gray-600 mb-4">{rec.summary}</p>
+                                    <p className="text-sm mb-4" style={{ color: "var(--mayo-text-secondary)" }}>{rec.summary}</p>
 
                                     {rec.rationale.length > 0 && (
-                                        <ul className="list-disc pl-5 text-sm flex flex-col gap-1 text-gray-700">
+                                        <ul className="list-disc pl-5 text-sm flex flex-col gap-1" style={{ color: "var(--mayo-text-secondary)" }}>
                                             {rec.rationale.map((line, i) => (
                                                 <li key={i}>{line}</li>
                                             ))}
@@ -466,15 +478,15 @@ export default function PlannerPage() {
                                     )}
 
                                     <ReferenceTable items={rec.referenceFestivals} venues={festivalVenues} />
-                                </article>
+                                </MayoCard>
                             ))}
                         </section>
 
                         {/* 방문자 구성 - 통신사 실측값. LLM 생성물이 아니다 */}
                         {visitorProfile && (
-                            <section className="bg-white rounded-xl shadow p-6">
+                            <MayoCard variant="outlined" padding="md">
                                 <h2 className="text-base font-bold mb-1">방문자 구성</h2>
-                                <p className="text-xs text-gray-500 mb-4">
+                                <p className="text-xs mb-4" style={{ color: "var(--mayo-text-muted)" }}>
                                     한국관광공사 통신사 기반 실측치 · {visitorProfile.year}년 {visitorProfile.month}월
                                 </p>
 
@@ -496,51 +508,47 @@ export default function PlannerPage() {
                                     ].map((s) => (
                                         <div key={s.label}>
                                             <div className="text-xl font-bold">{s.value}</div>
-                                            <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+                                            <div className="text-xs mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>{s.label}</div>
                                         </div>
                                     ))}
                                 </div>
 
-                                <p className="text-sm text-gray-700">
+                                <p className="text-sm" style={{ color: "var(--mayo-text-secondary)" }}>
                                     {visitorProfile.outsiderRatio >= visitorProfile.nationalOutsiderRatio
                                         ? "전국 평균보다 외부 유입이 많은 지역입니다. 외지 관광객을 겨냥한 기획이 통할 여지가 있습니다."
                                         : "전국 평균보다 외부 유입이 적은 지역입니다. 외지 관광객 유치보다 지역 주민 참여형 기획이 현실적일 수 있습니다."}
                                 </p>
-                            </section>
+                            </MayoCard>
                         )}
 
                         {/* AI 기획안 - 통계보다 늦게 도착한다 */}
                         {(llmLoading || llmPlan || llmError) && (
-                            <section className="bg-white rounded-xl shadow p-6">
+                            <MayoCard variant="outlined" padding="md">
                                 <div className="flex items-baseline justify-between gap-4 mb-3">
                                     <h2 className="text-base font-bold">AI 기획안 초안</h2>
                                     {llmPlan && (
-                                        <span className="text-[11px] text-gray-500">{llmPlan.model}</span>
+                                        <span className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>{llmPlan.model}</span>
                                     )}
                                 </div>
 
                                 {llmLoading && (
-                                    <div className="animate-pulse" aria-live="polite">
-                                        <p className="text-sm text-gray-500 mb-4">
+                                    <div aria-live="polite">
+                                        <p className="text-sm mb-4" style={{ color: "var(--mayo-text-muted)" }}>
                                             위 분석 근거로 기획안을 작성하는 중입니다...
                                         </p>
-                                        <div className="h-3 bg-gray-100 rounded mb-2" />
-                                        <div className="h-3 bg-gray-100 rounded mb-2 w-11/12" />
-                                        <div className="h-3 bg-gray-100 rounded mb-6 w-4/5" />
-                                        <div className="h-3 bg-gray-100 rounded mb-2 w-2/3" />
-                                        <div className="h-3 bg-gray-100 rounded w-3/4" />
+                                        <MayoLoadingSpinner size="md" color="blue" label="기획안 생성 중..." />
                                     </div>
                                 )}
 
                                 {llmError && !llmLoading && (
-                                    <p className="text-sm text-amber-800">
+                                    <MayoAlert type="warning">
                                         기획안을 생성하지 못했습니다: {llmError}
-                                    </p>
+                                    </MayoAlert>
                                 )}
 
                                 {llmPlan && !llmLoading && (
                                     <>
-                                        <p className="text-xs text-gray-500 mb-4">
+                                        <p className="text-xs mb-4" style={{ color: "var(--mayo-text-muted)" }}>
                                             위 분석 근거만 입력해 생성했습니다. 수치는 모두 위 카드에서 나온 실측값입니다.
                                         </p>
 
@@ -557,7 +565,7 @@ export default function PlannerPage() {
                                             .map((s) => (
                                                 <div key={s.title} className="mb-4 last:mb-0">
                                                     <h3 className="text-sm font-medium mb-1.5">{s.title}</h3>
-                                                    <ul className="list-disc pl-5 text-sm flex flex-col gap-1 text-gray-700">
+                                                    <ul className="list-disc pl-5 text-sm flex flex-col gap-1" style={{ color: "var(--mayo-text-secondary)" }}>
                                                         {s.items.map((item, i) => (
                                                             <li key={i}>{item}</li>
                                                         ))}
@@ -566,21 +574,22 @@ export default function PlannerPage() {
                                             ))}
                                     </>
                                 )}
-                            </section>
+                            </MayoCard>
                         )}
 
                         {/* 화이트스페이스 상세 */}
-                        <section className="bg-white rounded-xl shadow p-6">
-                            <button
+                        <MayoCard variant="outlined" padding="md">
+                            <MayoBtn
+                                variant="ghost"
+                                size="md"
                                 type="button"
                                 onClick={() => setShowWhitespace((v) => !v)}
-                                className="text-base font-bold flex items-center gap-2"
                             >
-                                화이트스페이스 상세
-                                <span className="text-xs font-normal text-gray-500">
+                                화이트스페이스 상세{" "}
+                                <span className="text-xs font-normal" style={{ color: "var(--mayo-text-muted)" }}>
                                     {showWhitespace ? "접기" : "펼치기"}
                                 </span>
-                            </button>
+                            </MayoBtn>
 
                             {showWhitespace && (
                                 <div className="mt-4 grid gap-6 sm:grid-cols-2">
@@ -595,39 +604,32 @@ export default function PlannerPage() {
                                         <div key={label}>
                                             <h3 className="text-sm font-medium mb-2">{label}</h3>
                                             {entries.length === 0 ? (
-                                                <p className="text-xs text-gray-500">근거가 충분한 항목이 없습니다.</p>
+                                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>근거가 충분한 항목이 없습니다.</p>
                                             ) : (
-                                                <table className="w-full text-xs">
-                                                    <thead>
-                                                        <tr className="text-left text-gray-500">
-                                                            <th className="py-1 font-medium">항목</th>
-                                                            <th className="py-1 font-medium text-right">전국</th>
-                                                            <th className="py-1 font-medium text-right">지역</th>
-                                                            <th className="py-1 font-medium text-right">기회</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {entries.slice(0, 8).map((e) => (
-                                                            <tr key={e.value} className="border-t border-gray-100">
-                                                                <td className="py-1">{e.label}</td>
-                                                                <td className="py-1 text-right">{e.nationalCount}</td>
-                                                                <td className="py-1 text-right">{e.regionCount}</td>
-                                                                <td className="py-1 text-right font-medium">
-                                                                    {Math.round(e.opportunityScore * 100)}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
+                                                <MayoTable<{ value: string; label: string; nationalCount: number; regionCount: number; opportunityScore: number }>
+                                                    columns={[
+                                                        { key: "label", label: "항목" },
+                                                        { key: "nationalCount", label: "전국" },
+                                                        { key: "regionCount", label: "지역" },
+                                                        {
+                                                            key: "opportunityScore",
+                                                            label: "기회",
+                                                            render: (val) => String(Math.round((val as number) * 100)),
+                                                        },
+                                                    ]}
+                                                    data={entries.slice(0, 8)}
+                                                    rowKey="value"
+                                                    bordered
+                                                />
                                             )}
                                         </div>
                                     ))}
                                 </div>
                             )}
-                        </section>
+                        </MayoCard>
 
                         {/* 연동 상태 + 경고 */}
-                        <section className="bg-white rounded-xl shadow p-6">
+                        <MayoCard variant="outlined" padding="md">
                             <h2 className="text-base font-bold mb-3">데이터 연동 상태</h2>
                             <ul className="text-sm flex flex-col gap-2">
                                 {(
@@ -644,9 +646,9 @@ export default function PlannerPage() {
                                     <li key={label} className="flex items-start gap-2">
                                         <span className="shrink-0">{status.enabled ? "✅" : "⬜"}</span>
                                         <span>
-                                            <span className={status.enabled ? "" : "text-gray-500"}>{label}</span>
+                                            <span className={status.enabled ? "" : ""} style={status.enabled ? {} : { color: "var(--mayo-text-muted)" }}>{label}</span>
                                             {status.reason && (
-                                                <span className="block text-xs text-gray-500">{status.reason}</span>
+                                                <span className="block text-xs" style={{ color: "var(--mayo-text-muted)" }}>{status.reason}</span>
                                             )}
                                         </span>
                                     </li>
@@ -654,13 +656,17 @@ export default function PlannerPage() {
                             </ul>
 
                             {result.warnings.length > 0 && (
-                                <ul className="mt-4 pt-4 border-t border-gray-200 text-xs text-amber-800 flex flex-col gap-1">
-                                    {result.warnings.map((w, i) => (
-                                        <li key={i}>· {w}</li>
-                                    ))}
-                                </ul>
+                                <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--mayo-border)" }}>
+                                    <MayoAlert type="warning">
+                                        <ul className="text-xs flex flex-col gap-1">
+                                            {result.warnings.map((w, i) => (
+                                                <li key={i}>· {w}</li>
+                                            ))}
+                                        </ul>
+                                    </MayoAlert>
+                                </div>
                             )}
-                        </section>
+                        </MayoCard>
                     </div>
                 )}
             </div>
