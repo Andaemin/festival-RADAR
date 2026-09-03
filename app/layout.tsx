@@ -2,10 +2,17 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import "mayoui-react/styles";
+import AppSidebar from "@/components/AppSidebar";
 
 const pretendard = localFont({
     src: "../public/fonts/PretendardVariable.woff2",
     variable: "--font-pretendard",
+    display: "swap",
+});
+
+const tossface = localFont({
+    src: "../public/fonts/TossFaceFontMac.ttf",
+    variable: "--font-tossface",
     display: "swap",
 });
 
@@ -17,8 +24,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
     return (
-        <html lang="ko" className={`${pretendard.variable} h-full antialiased`}>
-            <body className="min-h-full flex flex-col font-[family-name:var(--font-pretendard)]">{children}</body>
+        <html lang="ko" className={`${pretendard.variable} ${tossface.variable} h-full antialiased`}>
+            <body className="min-h-full flex font-[family-name:var(--font-pretendard)]">
+                <AppSidebar />
+                <main className="flex-1 min-h-screen overflow-auto">
+                    {children}
+                </main>
+            </body>
         </html>
     );
 }
