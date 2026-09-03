@@ -188,7 +188,7 @@ function getDayLabel(ymd: string) {
     return days[d.getDay()];
 }
 
-export default function ConcentrationTesterPage() {
+export default function ConcentrationPage() {
     const [areaCd, setAreaCd] = useState("");
     const [signguCd, setSignguCd] = useState("");
     const [selectedAttraction, setSelectedAttraction] = useState("");
@@ -297,13 +297,13 @@ export default function ConcentrationTesterPage() {
     const selectedSignguName = districts.find((d) => d.code === signguCd)?.name ?? "";
 
     return (
-        <main className="min-h-screen bg-[var(--mayo-bg-subtle)] py-8 px-4">
+        <main className="min-h-screen py-8 px-4" style={{ background: "var(--mayo-bg-subtle)" }}>
             <div className="max-w-6xl mx-auto">
-                <h1 className="text-2xl font-bold text-[var(--mayo-text)] mb-1">
-                    관광지 집중률 예측 테스터
+                <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--mayo-text)" }}>
+                    관광지 집중률 예측
                 </h1>
-                <p className="text-sm text-[var(--mayo-text-muted)] mb-6">
-                    한국관광공사 빅데이터 기반 향후 30일간 관광지별 방문자 집중률 예측
+                <p className="text-sm mb-6" style={{ color: "var(--mayo-text-muted)" }}>
+                    한국관광공사 빅데이터 기반 향후 30일간 관광지별 방문자 집중률 예측 분석
                 </p>
 
                 <MayoDivider />
@@ -395,24 +395,24 @@ export default function ConcentrationTesterPage() {
                         {/* 요약 카드 */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs text-[var(--mayo-text-muted)]">관광지</p>
-                                <p className="text-lg font-bold text-[var(--mayo-text)]">
+                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>관광지</p>
+                                <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
                                     {selectedAttraction}
                                 </p>
-                                <p className="text-xs text-[var(--mayo-text-muted)]">
+                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>
                                     {selectedAreaName} {selectedSignguName}
                                 </p>
                             </MayoCard>
                             <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs text-[var(--mayo-text-muted)]">예측 기간</p>
-                                <p className="text-lg font-bold text-[var(--mayo-text)]">
+                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>예측 기간</p>
+                                <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
                                     {summary.days}일
                                 </p>
                             </MayoCard>
                             <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs text-[var(--mayo-text-muted)]">평균 집중률</p>
+                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>평균 집중률</p>
                                 <div className="flex items-center gap-2">
-                                    <p className="text-lg font-bold text-[var(--mayo-text)]">
+                                    <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
                                         {summary.avg.toFixed(1)}%
                                     </p>
                                     <MayoBadge
@@ -425,9 +425,9 @@ export default function ConcentrationTesterPage() {
                                 </div>
                             </MayoCard>
                             <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs text-[var(--mayo-text-muted)]">최고 집중률</p>
+                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>최고 집중률</p>
                                 <div className="flex items-center gap-2">
-                                    <p className="text-lg font-bold text-[var(--mayo-text)]">
+                                    <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
                                         {summary.max.toFixed(1)}%
                                     </p>
                                     <MayoBadge
@@ -439,7 +439,7 @@ export default function ConcentrationTesterPage() {
                                     </MayoBadge>
                                 </div>
                                 {summary.maxItem && (
-                                    <p className="text-xs text-[var(--mayo-text-muted)] mt-1">
+                                    <p className="text-xs mt-1" style={{ color: "var(--mayo-text-muted)" }}>
                                         {formatDate(summary.maxItem.baseYmd)}
                                     </p>
                                 )}
@@ -558,7 +558,7 @@ export default function ConcentrationTesterPage() {
                                                     emptyText="데이터가 없습니다."
                                                 />
                                                 {items.length > 200 && (
-                                                    <p className="text-xs text-[var(--mayo-text-muted)] mt-2 text-center">
+                                                    <p className="text-xs mt-2 text-center" style={{ color: "var(--mayo-text-muted)" }}>
                                                         상위 200건만 표시 (전체 {items.length}건)
                                                     </p>
                                                 )}
@@ -575,8 +575,8 @@ export default function ConcentrationTesterPage() {
                 {!loading && items.length === 0 && !error && (
                     <div className="mt-8">
                         <MayoAlert type="info" title="사용 방법">
-                            시도와 시군구를 선택한 뒤 조회 버튼을 눌러주세요.
-                            관광지명을 입력하면 특정 관광지만 조회할 수 있습니다.
+                            시도와 시군구를 선택한 뒤 &quot;관광지 불러오기&quot; 버튼을 눌러주세요.
+                            관광지 목록에서 원하는 관광지를 선택하면 집중률 분석 결과를 확인할 수 있습니다.
                         </MayoAlert>
                     </div>
                 )}
