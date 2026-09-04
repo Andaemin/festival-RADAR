@@ -5,13 +5,14 @@ import { MayoToggle } from "mayoui-react";
 
 export default function ThemeToggle() {
     const [dark, setDark] = useState(false);
+    const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
         const saved = localStorage.getItem("theme");
-        if (saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
-            setDark(true);
-            document.documentElement.setAttribute("data-theme", "dark");
-        }
+        const isDark = saved === "dark";
+        setDark(isDark);
+        document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+        setMounted(true);
     }, []);
 
     function toggle(checked: boolean) {
@@ -19,6 +20,8 @@ export default function ThemeToggle() {
         document.documentElement.setAttribute("data-theme", checked ? "dark" : "light");
         localStorage.setItem("theme", checked ? "dark" : "light");
     }
+
+    if (!mounted) return null;
 
     return (
         <div className="flex items-center gap-2 px-3 py-2">

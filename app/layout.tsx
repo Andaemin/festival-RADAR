@@ -10,12 +10,6 @@ const pretendard = localFont({
     display: "swap",
 });
 
-const tossface = localFont({
-    src: "../public/fonts/TossFaceFontMac.ttf",
-    variable: "--font-tossface",
-    display: "swap",
-});
-
 export const metadata: Metadata = {
     // MetaData - next 에서 제공하는  <head> 임
     title: "Festival-Radar",
@@ -24,7 +18,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
     return (
-        <html lang="ko" className={`${pretendard.variable} ${tossface.variable} h-full antialiased`}>
+        <html lang="ko" data-theme="light" className={`${pretendard.variable} h-full antialiased`}>
             <body className="min-h-full flex">
                 <AppSidebar />
                 <main className="flex-1 min-h-screen overflow-auto">

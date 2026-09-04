@@ -289,13 +289,15 @@ export default function PlannerPage() {
                 <MayoCard variant="outlined" padding="md" className="mb-6">
                     <form onSubmit={handleSubmit}>
                         <div className="grid gap-4 sm:grid-cols-2">
-                            <MayoInput
+                            <MayoSelect
                                 label="기획연도"
-                                type="number"
                                 size="md"
-                                min={CURRENT_YEAR}
-                                value={planningYear}
+                                value={String(planningYear)}
                                 onChange={(e) => setPlanningYear(Number(e.target.value))}
+                                options={Array.from({ length: 7 }, (_, i) => {
+                                    const y = CURRENT_YEAR + i;
+                                    return { value: String(y), label: `${y}년` };
+                                })}
                             />
 
                             <MayoSelect

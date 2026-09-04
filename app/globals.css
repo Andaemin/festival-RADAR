@@ -12,8 +12,14 @@
   --font-mono: var(--font-geist-mono);
 }
 
+@font-face {
+  font-family: "TossFace";
+  src: url("/fonts/TossFaceFontMac.ttf") format("truetype");
+  unicode-range: U+2600-26FF, U+2700-27BF, U+FE00-FE0F, U+1F000-1FAFF;
+}
+
 body {
   background: var(--mayo-bg);
   color: var(--mayo-text);
-  font-family: var(--font-tossface), var(--font-pretendard), Arial, Helvetica, sans-serif;
+  font-family: "TossFace", var(--font-pretendard), Arial, Helvetica, sans-serif;
 }

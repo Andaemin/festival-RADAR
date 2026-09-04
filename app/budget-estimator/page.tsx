@@ -19,14 +19,20 @@ import type { SeriesHistoryDetailDto, SeriesHistoryExclusionReason } from "@/lib
 import type { DataQualityAuditReason, DataQualityAuditSeverity, SeriesDataQualityAuditRecord } from "@/lib/multiyear-series/data-quality-audit";
 import { quantile } from "@/lib/utils/weighted-statistics";
 import {
+    MayoAccordion,
     MayoAlert,
+    MayoBarChart,
     MayoBadge,
     MayoBtn,
     MayoCard,
     MayoDivider,
     MayoInput,
     MayoLoadingSpinner,
+    MayoPieChart,
+    MayoProgress,
     MayoSelect,
+    MayoTable,
+    MayoTag,
     MayoToggle,
 } from "mayoui-react";
 
@@ -130,6 +136,7 @@ export default function BudgetEstimatorPage() {
     // 개최일수를 그대로 보여주기 위한 스냅샷(라이브 폼 durationDays가 결과 표시 이후 바뀌어도
     // 이미 계산된 결과의 헤더 문구가 같이 흔들리지 않게 한다).
     const [submittedDurationDays, setSubmittedDurationDays] = useState<number | null>(null);
+    const [loadingProgress, setLoadingProgress] = useState(0);
 
     // PHASE 6 — 기존 축제 검색(FestivalSeries autocomplete) 상태. selectedSeries는 UI 표시
     // 전용이며(어떤 series를 기반으로 자동입력됐는지), estimate 요청에는 절대 실리지 않는다
@@ -324,16 +331,32 @@ export default function BudgetEstimatorPage() {
         setVenueType(result.fieldStatus.venueType === "STABLE" && result.autoFill.venueType ? result.autoFill.venueType : "");
     }
 
+    // 로딩 프로그레스 시뮬레이션 — loading=true 동안 0→90%까지 점진적으로 올리고,
+    // 완료 시 100%로 마무리한다. 실제 API 응답 시간을 모르므로 감속 곡선으로 시뮬레이션.
+    useEffect(() => {
+        if (!loading) return;
+        let frame: number;
+        let start: number | null = null;
+        const tick = (ts: number) => {
+            if (start === null) start = ts;
+            const elapsed = ts - start;
+            // 5초에 걸쳐 0→90%까지 감속 곡선
+            const pct = Math.min(90, 90 * (1 - Math.exp(-elapsed / 2000)));
+            setLoadingProgress(Math.round(pct));
+            frame = requestAnimationFrame(tick);
+        };
+        frame = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(frame);
+    }, [loading]);
+
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
-        // 버튼 disabled로 이미 막지만, Enter 키 제출 등 예외 경로까지 대비한 방어적 재확인
-        // (canSubmit과 동일 조건). durationDays=""였다면 Number("")=0이 그대로 request에 실릴 수
-        // 있었던 문제를 여기서도 완전히 막는다.
         if (!canSubmit) return;
         setError(null);
         setResult(null);
         setMetadataResetNotice(false);
         setLoading(true);
+        setLoadingProgress(0);
         try {
             const data = await estimateMultiYearBudget({
                 regionCode,
@@ -342,11 +365,10 @@ export default function BudgetEstimatorPage() {
                 venueType,
                 durationDays: Number(durationDays),
                 planningYear: Number(planningYear),
-                // 3절 — 기본 production 조건은 항상 HISTORICAL_ONLY로 고정한다
-                // (참고 데이터 정책 라디오 UI 자체를 제거했다).
                 referenceDataPolicy: "HISTORICAL_ONLY",
                 festivalName: festivalName.trim() || undefined,
             });
+            setLoadingProgress(100);
             setResult(data);
             setSubmittedDurationDays(Number(durationDays));
         } catch (e) {
@@ -355,12 +377,6 @@ export default function BudgetEstimatorPage() {
             setLoading(false);
         }
     }
-
-    const regionName = metadata?.regions.find((r) => r.code === regionCode)?.displayName ?? regionCode;
-    const typeNames = festivalTypes
-        .map((c) => metadata?.festivalTypes.find((t) => t.code === c)?.displayName ?? c)
-        .join(", ");
-    const venueName = metadata?.venueTypes.find((v) => v.code === venueType)?.displayName ?? venueType;
 
     // PHASE 6 — Series autofill이 region/venueType을 MIXED/MISSING으로 판정하면 ""(직접 선택
     // placeholder)로 남는다 - 이 값은 실제 metadata enum이 아니므로 submit 전에 반드시 채워야
@@ -388,345 +404,180 @@ export default function BudgetEstimatorPage() {
     const venueAutoFilled = selectedSeries !== null && selectedSeries.fieldStatus.venueType === "STABLE" && venueType === selectedSeries.autoFill.venueType;
 
     return (
-        <main className="min-h-screen lg:h-screen flex flex-col p-4 lg:p-6 lg:overflow-hidden" style={{ background: "var(--mayo-bg-subtle)", color: "var(--mayo-text)" }}>
-            <header className="shrink-0 mb-4">
-                <h1 className="text-xl font-bold">예산 추정</h1>
-                <p className="text-xs mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
-                    2017~2026 공개 축제 계획 데이터를 기반으로 다년도 계획예산을 추정합니다.
-                </p>
+        <main className="min-h-screen flex flex-col p-4 lg:p-5 gap-4" style={{ background: "var(--mayo-bg-subtle)", color: "var(--mayo-text)" }}>
+            {/* ── 헤더 ── */}
+            <header className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-lg font-bold">💰 예산 추정</h1>
+                    <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>2017~2026 공개 축제 계획 데이터 기반 다년도 계획예산 추정</p>
+                </div>
+                <div className="flex items-center gap-2">
+                    {result && <MayoTag color="green" variant="soft" size="sm">{result.estimateBasis === "SERIES_HISTORY_MEDIAN" ? "SERIES" : "PEER"}</MayoTag>}
+                    {result && <MayoTag color={result.reliabilityTier === "HIGH" ? "green" : result.reliabilityTier === "MEDIUM" ? "purple" : "gray"} variant="soft" size="sm">{RELIABILITY_LABEL[result.reliabilityTier]}</MayoTag>}
+                </div>
             </header>
 
-            {metaError && (
-                <div className="shrink-0 mb-4 max-w-[1600px] w-full mx-auto">
-                    <MayoAlert type="error">메타데이터 오류: {metaError}</MayoAlert>
-                </div>
-            )}
+            {metaError && <MayoAlert type="error">메타데이터 오류: {metaError}</MayoAlert>}
 
-            <div className="flex-1 min-h-0 w-full max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(320px,38%)_1fr] gap-4 lg:gap-6">
-                {/* 좌측: 입력 조건 */}
-                <section className="lg:overflow-y-auto lg:pr-1 flex flex-col gap-4 pb-4">
-                    <form onSubmit={handleSubmit}>
-                    <MayoCard variant="outlined" padding="md">
-                        <div className="flex flex-col gap-4">
-                        <div className="w-32">
-                            <MayoInput
-                                label="계획연도"
-                                type="number"
-                                size="md"
-                                value={planningYear}
-                                onChange={(e) => handlePlanningYearChange(Number(e.target.value))}
-                            />
-                        </div>
-
-                        {/* PHASE 6 — 축제 구분을 가장 먼저 명시적으로 고른다(segmented control). */}
+            {/* ── 입력 폼 — 위쪽, 가로 배치 ── */}
+            <form onSubmit={handleSubmit}>
+            <MayoCard variant="outlined" padding="md">
+                <div className="flex flex-col gap-3">
+                    {/* Row 1: 계획연도 + 축제구분 + 축제 검색/이름 */}
+                    <div className="grid grid-cols-1 md:grid-cols-[120px_1fr_1fr] gap-3 items-start">
+                        <MayoSelect
+                            label="계획연도"
+                            size="sm"
+                            value={String(planningYear)}
+                            onChange={(e) => handlePlanningYearChange(Number(e.target.value))}
+                            options={Array.from({ length: 7 }, (_, i) => {
+                                const y = 2024 + i;
+                                return { value: String(y), label: `${y}년` };
+                            })}
+                        />
                         <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">어떤 축제를 계획하고 있나요?</label>
-                            <div className="flex gap-2" role="radiogroup" aria-label="축제 구분">
-                                <MayoBtn
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={festivalMode === "EXISTING"}
-                                    onClick={() => handleFestivalModeChange("EXISTING")}
-                                    variant={festivalMode === "EXISTING" ? "primary" : "secondary"}
-                                    color="green"
-                                    size="sm"
-                                    style={{ flex: 1 }}
-                                >
-                                    과년도에 개최했던 축제
-                                </MayoBtn>
-                                <MayoBtn
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={festivalMode === "NEW"}
-                                    onClick={() => handleFestivalModeChange("NEW")}
-                                    variant={festivalMode === "NEW" ? "primary" : "secondary"}
-                                    color="green"
-                                    size="sm"
-                                    style={{ flex: 1 }}
-                                >
-                                    신규 축제
-                                </MayoBtn>
+                            <label className="text-xs font-medium">축제 구분</label>
+                            <div className="flex gap-1.5" role="radiogroup" aria-label="축제 구분">
+                                <MayoBtn type="button" onClick={() => handleFestivalModeChange("EXISTING")} variant={festivalMode === "EXISTING" ? "primary" : "secondary"} color="green" size="xs" style={{ flex: 1 }}>기존 축제</MayoBtn>
+                                <MayoBtn type="button" onClick={() => handleFestivalModeChange("NEW")} variant={festivalMode === "NEW" ? "primary" : "secondary"} color="green" size="xs" style={{ flex: 1 }}>신규 축제</MayoBtn>
                             </div>
                         </div>
-
-                        {festivalMode === "EXISTING" ? (
-                            <div className="flex flex-col gap-1 relative">
-                                <MayoInput
-                                    label="축제명 검색"
-                                    type="text"
-                                    size="md"
-                                    placeholder="예: 부산국제록페스티벌 (2자 이상 입력 시 과거 데이터 검색)"
-                                    value={seriesSearchText}
-                                    onChange={(e) => handleSeriesSearchTextChange(e.target.value)}
-                                    onFocus={() => {
-                                        if (seriesSearchResults.length > 0) setSeriesSearchOpen(true);
-                                    }}
-                                    onBlur={() => setSeriesSearchOpen(false)}
-                                />
-
-                                {/* PHASE 6 — 검색어 자체는 festivalName이 아니라는 것을 항상 보이는
-                                    자리에서 설명한다. */}
-                                {!selectedSeries && !metadataResetNotice && (
-                                    <p className="text-[11px] mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
-                                        과거 데이터에 있는 실제 축제를 검색해 목록에서 직접 선택해주세요. 이 입력창의 글자 자체는 최종 축제명이 아닙니다.
-                                    </p>
-                                )}
-
-                                {metadataResetNotice && !selectedSeries && (
-                                    <MayoAlert type="warning">
-                                        검색어를 수정해 이전 선택과 자동입력 정보를 초기화했습니다 — 목록에서 다시 선택해주세요.
-                                    </MayoAlert>
-                                )}
-
-                                {seriesSearchOpen && (
-                                    <div
-                                        className="absolute left-0 right-0 top-full mt-1 z-10 rounded-lg max-h-72 overflow-y-auto text-sm"
-                                        style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", boxShadow: "var(--mayo-shadow-md)" }}
-                                        onMouseDown={(e) => e.preventDefault()}
-                                    >
-                                        {seriesSearchLoading && (
-                                            <div className="px-3 py-2.5">
-                                                <MayoLoadingSpinner size="sm" color="blue" label="검색 중..." />
-                                            </div>
-                                        )}
-                                        {!seriesSearchLoading && seriesSearchResults.length === 0 && (
-                                            <div className="px-3 py-2.5 text-xs" style={{ color: "var(--mayo-text-muted)" }}>
-                                                과거 데이터에서 해당 축제를 찾지 못했습니다. 새로운 축제를 계획 중이라면 위에서 &lsquo;신규 축제&rsquo;를 선택해주세요.
-                                            </div>
-                                        )}
-                                        {!seriesSearchLoading && seriesSearchResults.length > 0 && (
-                                            <div className="px-3 py-1.5 text-[10px] font-semibold sticky top-0" style={{ color: "var(--mayo-text-muted)", background: "var(--mayo-bg-subtle)", borderBottom: "1px solid var(--mayo-border)" }}>
-                                                과거 데이터에서 찾은 관련 축제
-                                            </div>
-                                        )}
-                                        {!seriesSearchLoading && seriesSearchResults.map((r) => (
-                                            <button
-                                                key={buildSeriesSearchResultKey(r)}
-                                                type="button"
-                                                onClick={() => handleSelectSeries(r)}
-                                                className="w-full text-left px-3 py-2"
-                                                style={{ borderBottom: "1px solid var(--mayo-border)" }}
-                                            >
-                                                <div className="font-medium" style={{ color: "var(--mayo-text)" }}>{r.canonicalName}</div>
-                                                <div className="text-[11px] mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
-                                                    {[
-                                                        r.regionCode ? REGION_DISPLAY[r.regionCode] : null,
-                                                        r.district ?? null,
-                                                        r.fieldStatus.festivalTypes === "STABLE" && r.autoFill.festivalTypes.length > 0
-                                                            ? r.autoFill.festivalTypes.map((t) => FESTIVAL_TYPE_DISPLAY[t]).join("/")
-                                                            : null,
-                                                    ]
-                                                        .filter(Boolean)
-                                                        .join(" · ") || "지역/유형 정보가 연도별로 상이"}
-                                                </div>
-                                                <div className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
-                                                    {r.firstObservedYear}~{r.lastObservedYear} · 과거 이력 {r.historyCount}회
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {/* PHASE 6 — Series 선택 즉시 별도의 시각적 블록으로 "과거 이력 기반
-                                    기본 정보"를 보여준다. STABLE/MIXED/MISSING 원문은 노출하지 않는다. */}
-                                {selectedSeries && (
-                                    <div className="mt-1">
-                                        <MayoAlert type="success" title="과거 축제 데이터를 불러왔습니다.">
-                                            <p className="font-semibold mt-1">{selectedSeries.canonicalName}</p>
-                                            <p className="text-[11px]">
-                                                과거 이력 {selectedSeries.historyCount}회 · {selectedSeries.firstObservedYear}~{selectedSeries.lastObservedYear}
-                                            </p>
-                                            <MayoDivider />
-                                            <div className="flex flex-col gap-0.5">
-                                                <p className="text-[11px] font-semibold mb-0.5">과거 이력 기반 기본 정보</p>
-                                                <SeriesFieldSummaryRow
-                                                    label="광역자치단체"
-                                                    status={selectedSeries.fieldStatus.region}
-                                                    value={selectedSeries.autoFill.regionCode ? REGION_DISPLAY[selectedSeries.autoFill.regionCode] : null}
-                                                />
-                                                <SeriesFieldSummaryRow label="시군구" status={selectedSeries.fieldStatus.district} value={selectedSeries.autoFill.district} />
-                                                <SeriesFieldSummaryRow
-                                                    label="축제 유형"
-                                                    status={selectedSeries.fieldStatus.festivalTypes}
-                                                    value={selectedSeries.autoFill.festivalTypes.length > 0 ? selectedSeries.autoFill.festivalTypes.map((t) => FESTIVAL_TYPE_DISPLAY[t]).join("/") : null}
-                                                />
-                                                <SeriesFieldSummaryRow
-                                                    label="장소 유형"
-                                                    status={selectedSeries.fieldStatus.venueType}
-                                                    value={selectedSeries.autoFill.venueType ? VENUE_TYPE_DISPLAY[selectedSeries.autoFill.venueType] : null}
-                                                />
-                                            </div>
-                                            <p className="text-[11px] mt-2">아래 값들은 자유롭게 수정할 수 있습니다 — 자동 설정된 값은 원래대로 유지될 때만 표시됩니다.</p>
-                                        </MayoAlert>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="flex flex-col gap-1">
-                                <MayoInput
-                                    label="축제명 (선택)"
-                                    type="text"
-                                    size="md"
-                                    placeholder="예: 한강페스티벌 (신규 축제 이름을 자유롭게 입력하세요)"
-                                    value={festivalName}
-                                    onChange={(e) => handleNewFestivalNameChange(e.target.value)}
-                                    hint="새로운 축제이므로 이름을 입력하지 않아도 계산할 수 있습니다."
-                                />
-                            </div>
-                        )}
-
-                        <div className="flex flex-col gap-1">
-                            <MayoSelect
-                                label={regionAutoFilled ? "광역자치단체 (자동 설정)" : "광역자치단체"}
-                                size="md"
-                                placeholder="직접 선택"
-                                value={regionCode}
-                                onChange={(e) => { setRegionCode(e.target.value); setDistrict(""); }}
-                                disabled={!metadata}
-                                options={metadata?.regions.map((r) => ({ value: r.code, label: r.displayName })) ?? []}
-                                hint={selectedSeries && selectedSeries.fieldStatus.region !== "STABLE" && !regionCode ? (seriesFieldHint(selectedSeries.fieldStatus.region) ?? undefined) : undefined}
-                            />
-                            {regionAutoFilled && <MayoBadge color="green" variant="soft" size="sm">자동 설정</MayoBadge>}
-                        </div>
-
-                        <div className="flex flex-col gap-1">
-                            <MayoSelect
-                                label={districtAutoFilled ? "시군구 (선택, 자동 설정)" : "시군구 (선택)"}
-                                size="md"
-                                placeholder="-- 선택 안 함 --"
-                                value={district}
-                                onChange={(e) => setDistrict(e.target.value)}
-                                disabled={districts.length === 0}
-                                options={districts.map((d) => ({ value: d, label: d }))}
-                                hint={selectedSeries && selectedSeries.fieldStatus.district !== "STABLE" && district === "" ? `${seriesFieldHint(selectedSeries.fieldStatus.district)}(선택 입력 항목입니다)` : undefined}
-                            />
-                            {districtAutoFilled && <MayoBadge color="green" variant="soft" size="sm">자동 설정</MayoBadge>}
-                        </div>
-
-                        <div className="flex flex-col gap-1">
-                            <label className="text-sm font-medium">
-                                축제 유형 <span style={{ color: "var(--mayo-text-muted)", fontWeight: "normal" }}>(복수 선택 가능)</span>
-                                {festivalTypesAutoFilled && <> <MayoBadge color="green" variant="soft" size="sm">자동 설정</MayoBadge></>}
-                            </label>
-                            <div className="flex flex-wrap gap-3">
-                                {metadata?.festivalTypes.map((t) => (
-                                    <MayoToggle
-                                        key={t.code}
-                                        checked={festivalTypes.includes(t.code)}
-                                        onChange={() => toggleFestivalType(t.code)}
-                                        label={t.displayName}
+                        <div className="relative">
+                            {festivalMode === "EXISTING" ? (
+                                <>
+                                    <MayoInput
+                                        label="축제명 검색"
+                                        type="text"
                                         size="sm"
-                                        color="blue"
+                                        placeholder="2자 이상 입력 시 과거 데이터 검색"
+                                        value={seriesSearchText}
+                                        onChange={(e) => handleSeriesSearchTextChange(e.target.value)}
+                                        onFocus={() => { if (seriesSearchResults.length > 0) setSeriesSearchOpen(true); }}
+                                        onBlur={() => setSeriesSearchOpen(false)}
                                     />
-                                ))}
-                            </div>
-                            {selectedSeries && selectedSeries.fieldStatus.festivalTypes !== "STABLE" && festivalTypes.length === 0 && (
-                                <p className="text-[11px] mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>{seriesFieldHint(selectedSeries.fieldStatus.festivalTypes)}</p>
+                                    {seriesSearchOpen && (
+                                        <div className="absolute left-0 right-0 top-full mt-1 z-10 rounded-lg max-h-60 overflow-y-auto text-sm" style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", boxShadow: "var(--mayo-shadow-md)" }} onMouseDown={(e) => e.preventDefault()}>
+                                            {seriesSearchLoading && <div className="px-3 py-2"><MayoLoadingSpinner size="sm" color="blue" label="검색 중..." /></div>}
+                                            {!seriesSearchLoading && seriesSearchResults.length === 0 && <div className="px-3 py-2 text-xs" style={{ color: "var(--mayo-text-muted)" }}>결과 없음 — 신규 축제를 선택해주세요.</div>}
+                                            {!seriesSearchLoading && seriesSearchResults.map((r) => (
+                                                <button key={buildSeriesSearchResultKey(r)} type="button" onClick={() => handleSelectSeries(r)} className="w-full text-left px-3 py-1.5 hover:opacity-80" style={{ borderBottom: "1px solid var(--mayo-border)" }}>
+                                                    <span className="font-medium text-sm">{r.canonicalName}</span>
+                                                    <span className="text-[10px] ml-2" style={{ color: "var(--mayo-text-muted)" }}>
+                                                        {r.regionCode ? REGION_DISPLAY[r.regionCode] : ""} · {r.firstObservedYear}~{r.lastObservedYear} ({r.historyCount}회)
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <MayoInput label="축제명 (선택)" type="text" size="sm" placeholder="신규 축제 이름" value={festivalName} onChange={(e) => handleNewFestivalNameChange(e.target.value)} />
                             )}
                         </div>
+                    </div>
 
-                        <div className="flex flex-col gap-1">
-                            <MayoSelect
-                                label={venueAutoFilled ? "장소 유형 (자동 설정)" : "장소 유형"}
-                                size="md"
-                                placeholder="직접 선택"
-                                value={venueType}
-                                onChange={(e) => setVenueType(e.target.value)}
-                                disabled={!metadata}
-                                options={metadata?.venueTypes.map((v) => ({ value: v.code, label: v.displayName })) ?? []}
-                                hint={selectedSeries && selectedSeries.fieldStatus.venueType !== "STABLE" && !venueType ? (seriesFieldHint(selectedSeries.fieldStatus.venueType) ?? undefined) : undefined}
-                            />
-                            {venueAutoFilled && <MayoBadge color="green" variant="soft" size="sm">자동 설정</MayoBadge>}
+                    {/* Series 선택 결과 — 깔끔한 태그 표시 */}
+                    {selectedSeries && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <MayoTag color="green" variant="solid" size="sm">{selectedSeries.canonicalName}</MayoTag>
+                            <span className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>이력 {selectedSeries.historyCount}회 · {selectedSeries.firstObservedYear}~{selectedSeries.lastObservedYear}</span>
+                            {selectedSeries.fieldStatus.region === "STABLE" && <MayoTag color="blue" variant="soft" size="sm">{REGION_DISPLAY[selectedSeries.autoFill.regionCode!]}</MayoTag>}
+                            {selectedSeries.fieldStatus.festivalTypes === "STABLE" && selectedSeries.autoFill.festivalTypes.map((t) => (
+                                <MayoTag key={t} color="purple" variant="soft" size="sm">{FESTIVAL_TYPE_DISPLAY[t]}</MayoTag>
+                            ))}
+                            {selectedSeries.fieldStatus.venueType === "STABLE" && <MayoTag color="orange" variant="soft" size="sm">{VENUE_TYPE_DISPLAY[selectedSeries.autoFill.venueType!]}</MayoTag>}
+                            {selectedSeries.fieldStatus.district === "STABLE" && <MayoTag color="gray" variant="soft" size="sm">{selectedSeries.autoFill.district}</MayoTag>}
                         </div>
+                    )}
+                    {metadataResetNotice && !selectedSeries && (
+                        <MayoAlert type="warning">검색어 변경으로 이전 선택이 초기화되었습니다. 목록에서 다시 선택해주세요.</MayoAlert>
+                    )}
 
-                        {/* PHASE 6 — durationDays는 절대 Series history에서 자동입력하지 않는다는
-                            기존 정책을 유지하면서, "올해 계획 정보"로 시각적 구분만 더한다. */}
-                        <MayoDivider />
+                    {/* Row 2: 지역/시군구/축제유형/장소유형/개최일수 + 계산 버튼 */}
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-start">
+                        <MayoSelect
+                            label={regionAutoFilled ? "광역자치단체 ✓" : "광역자치단체"}
+                            size="sm"
+                            placeholder="선택"
+                            value={regionCode}
+                            onChange={(e) => { setRegionCode(e.target.value); setDistrict(""); }}
+                            disabled={!metadata}
+                            options={metadata?.regions.map((r) => ({ value: r.code, label: r.displayName })) ?? []}
+                        />
+                        <MayoSelect
+                            label={districtAutoFilled ? "시군구 ✓" : "시군구"}
+                            size="sm"
+                            placeholder="선택 안 함"
+                            value={district}
+                            onChange={(e) => setDistrict(e.target.value)}
+                            disabled={districts.length === 0}
+                            options={districts.map((d) => ({ value: d, label: d }))}
+                        />
                         <div className="flex flex-col gap-1">
-                            <p className="text-[11px] font-semibold" style={{ color: "var(--mayo-text-muted)" }}>올해 계획 정보</p>
-                            <div className="w-32">
-                                <MayoInput
-                                    label="개최 일수 (직접 입력)"
-                                    type="number"
-                                    size="md"
-                                    min={2}
-                                    max={180}
-                                    placeholder="예: 3"
-                                    value={durationDays}
-                                    onChange={(e) => setDurationDays(e.target.value === "" ? "" : Number(e.target.value))}
-                                    hint="올해 계획한 개최기간을 직접 입력해주세요."
-                                />
+                            <label className="text-xs font-medium">
+                                축제 유형 {festivalTypesAutoFilled && <span style={{ color: "var(--mayo-primary, #10b981)" }}>✓</span>}
+                            </label>
+                            <div className="flex flex-wrap gap-1.5">
+                                {metadata?.festivalTypes.map((t) => (
+                                    <MayoToggle key={t.code} checked={festivalTypes.includes(t.code)} onChange={() => toggleFestivalType(t.code)} label={t.displayName} size="sm" color="blue" />
+                                ))}
                             </div>
                         </div>
-
-                        <MayoBtn
-                            type="submit"
-                            disabled={loading || !metadata || !canSubmit}
-                            variant="primary"
-                            color="green"
-                            size="md"
-                        >
-                            {loading ? "계산 중..." : "다년도 계획예산 계산"}
-                        </MayoBtn>
-                        {!canSubmit && (
-                            <MayoAlert type="warning">
-                                계산하려면 다음 정보를 입력해주세요: <span className="font-semibold">{missingRequiredFields.join(" · ")}</span>
-                                {missingDueToSeries && (
-                                    <p className="text-xs mt-1">과거 이력이 연도별로 달라 자동입력하지 않은 항목이 있습니다.</p>
-                                )}
-                            </MayoAlert>
-                        )}
+                        <MayoSelect
+                            label={venueAutoFilled ? "장소 유형 ✓" : "장소 유형"}
+                            size="sm"
+                            placeholder="선택"
+                            value={venueType}
+                            onChange={(e) => setVenueType(e.target.value)}
+                            disabled={!metadata}
+                            options={metadata?.venueTypes.map((v) => ({ value: v.code, label: v.displayName })) ?? []}
+                        />
+                        <MayoInput label="개최 일수" type="number" size="sm" min={2} max={180} placeholder="예: 3" value={durationDays} onChange={(e) => setDurationDays(e.target.value === "" ? "" : Number(e.target.value))} />
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium">&nbsp;</label>
+                            <MayoBtn type="submit" disabled={loading || !metadata || !canSubmit} variant="primary" color="green" size="sm" style={{ width: "100%" }}>
+                                {loading ? `계산 중 ${loadingProgress}%` : "계획예산 계산"}
+                            </MayoBtn>
                         </div>
-                    </MayoCard>
-                    </form>
-
-                    {error && (
-                        <MayoAlert type="error">{error}</MayoAlert>
+                    </div>
+                    {!canSubmit && (
+                        <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
+                            필요 항목: <span className="font-semibold">{missingRequiredFields.join(" · ")}</span>
+                            {missingDueToSeries && " (과거 이력이 연도별로 달라 자동입력 안 됨)"}
+                        </p>
                     )}
+                </div>
+            </MayoCard>
+            </form>
 
-                    {/* 5절 — 폼 값과 실제 API로 보내는 값이 눈에 보이도록, 현재 form state를 그대로 반영한 요약 */}
-                    <MayoCard variant="outlined" padding="sm">
-                        <p className="font-semibold mb-2 text-xs" style={{ color: "var(--mayo-text-secondary)" }}>입력 요약 (API 요청값)</p>
-                        <dl className="grid grid-cols-[5.5rem_1fr] gap-y-1.5 gap-x-2 text-xs">
-                            <dt style={{ color: "var(--mayo-text-muted)" }}>계획연도</dt>
-                            <dd className="font-medium">{planningYear}</dd>
-                            <dt style={{ color: "var(--mayo-text-muted)" }}>지역</dt>
-                            <dd className="font-medium">{regionName}{district ? ` / ${district}` : ""}</dd>
-                            <dt style={{ color: "var(--mayo-text-muted)" }}>유형</dt>
-                            <dd className="font-medium">{typeNames || "(선택 안 됨)"}</dd>
-                            <dt style={{ color: "var(--mayo-text-muted)" }}>장소</dt>
-                            <dd className="font-medium">{venueName}</dd>
-                            <dt style={{ color: "var(--mayo-text-muted)" }}>기간</dt>
-                            <dd className="font-medium">{durationDays === "" ? "(미입력)" : `${durationDays}일`}</dd>
-                            <dt style={{ color: "var(--mayo-text-muted)" }}>축제명</dt>
-                            <dd className="font-medium">
-                                {festivalName.trim() ||
-                                    (festivalMode === "EXISTING" ? "(기존 축제를 선택해주세요)" : "(없음 — 신규 축제로 취급)")}
-                            </dd>
-                            <dt style={{ color: "var(--mayo-text-muted)" }}>Reference policy</dt>
-                            <dd className="font-medium">HISTORICAL_ONLY <span style={{ color: "var(--mayo-text-muted)", fontWeight: "normal" }}>(고정)</span></dd>
-                        </dl>
-                    </MayoCard>
-                </section>
+            {error && <MayoAlert type="error">{error}</MayoAlert>}
 
-                {/* 우측: 결과 / 계산 근거 */}
-                <section className="lg:overflow-y-auto lg:pl-1 flex flex-col gap-4 pb-4">
-                    {!result && (
-                        <MayoCard variant="outlined" padding="lg">
-                            <p className="text-sm text-center" style={{ color: "var(--mayo-text-muted)" }}>
-                                좌측에서 조건을 입력하고 계산을 실행하면 결과가 여기 표시됩니다.
-                            </p>
-                        </MayoCard>
-                    )}
-                    {result && <ResultPane result={result} requestedDurationDays={submittedDurationDays} />}
+            {/* ── 로딩 프로그레스 ── */}
+            {loading && (
+                <MayoCard variant="outlined" padding="md">
+                    <p className="text-sm font-medium mb-2">다년도 계획예산 계산 중...</p>
+                    <MayoProgress value={loadingProgress} max={100} size="md" color="green" label="분석 진행률" showValue />
+                </MayoCard>
+            )}
 
-                    {/* 17/18절 — 특정 estimate 결과와 무관하게 항상 표시(전체 데이터 품질 감사). */}
-                    <GlobalDataQualityAuditSection />
+            {/* ── 결과 대시보드 ── */}
+            {!result && !loading && (
+                <MayoCard variant="outlined" padding="lg">
+                    <p className="text-sm text-center" style={{ color: "var(--mayo-text-muted)" }}>
+                        위에서 조건을 입력하고 계산을 실행하면 결과가 여기 표시됩니다.
+                    </p>
+                </MayoCard>
+            )}
+            {result && !loading && <ResultPane result={result} requestedDurationDays={submittedDurationDays} />}
 
-                    {/* G0 이후 Reliability Revalidation — 특정 estimate 결과와 무관하게 항상 표시. */}
-                    <GlobalReliabilityAuditSection />
-                </section>
-            </div>
+            {/* ── 전체 감사 (항상 표시) ── */}
+            <MayoAccordion
+                bordered
+                items={[
+                    { value: "data-quality", label: "전체 데이터 품질 감사 (Series Data Quality Audit)", children: <GlobalDataQualityAuditInner /> },
+                    { value: "reliability", label: "전체 Reliability 감사 (G0 이후 재검증, leakage-safe backtest)", children: <GlobalReliabilityAuditInner /> },
+                ]}
+            />
         </main>
     );
 }
@@ -780,93 +631,178 @@ function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudget
     const seriesDisplay = resolveSeriesDisplayState(result.estimateBasis, result.seriesSignal);
     const noSample = result.sampleCount === 0;
 
+    // Peer 통계 차트 데이터
+    const peerChartData = result.sampleCount > 0 ? [
+        { label: "P25", value: result.p25Krw / 1e8 },
+        { label: "P50", value: result.p50Krw / 1e8 },
+        { label: "P60", value: result.p60Krw / 1e8 },
+        { label: "P75", value: result.p75Krw / 1e8 },
+        { label: "예상", value: result.estimatedBudgetKrw / 1e8 },
+        { label: "추천", value: result.recommendedBudgetKrw / 1e8 },
+    ] : [];
+
+    // 연도별 반영 비중 차트 데이터
+    const yearWeightChartData = result.yearWeightBreakdown.map((y) => ({
+        label: String(y.year),
+        weight: Math.round(y.weightShare * 100),
+        count: y.candidateCount,
+    }));
+
+    // 추정 방식 도넛
+    const basisPieData = [
+        { label: isSeries ? "SERIES (동일축제)" : "PEER (유사축제)", value: 1, color: isSeries ? "#10b981" : "#6366f1" },
+    ];
+
+    // 신뢰도 도넛 — 비율 시각화
+    const reliabilityPieData = [
+        { label: "신뢰도 근거", value: result.reliabilityTier === "HIGH" ? 90 : result.reliabilityTier === "MEDIUM" ? 60 : 30, color: result.reliabilityTier === "HIGH" ? "#10b981" : result.reliabilityTier === "MEDIUM" ? "#8b5cf6" : "#9ca3af" },
+        { label: "", value: result.reliabilityTier === "HIGH" ? 10 : result.reliabilityTier === "MEDIUM" ? 40 : 70, color: "var(--mayo-bg-subtle)" },
+    ];
+
+    // Series fallback 메시지
+    const seriesFallbackKind = seriesDisplay.kind;
+
+    // Accordion 상세 섹션
+    const accordionItems = [
+        {
+            value: "basis",
+            label: "예산 산정 근거 및 추천 공식 검증",
+            children: (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <p className="text-xs font-semibold mb-2">산정 근거</p>
+                        <FieldGrid rows={[
+                            ["Estimate basis", <MayoTag key="eb" color="blue" variant="soft" size="sm">{result.estimateBasis}</MayoTag>],
+                            ["Recommendation basis", <MayoTag key="rb" color="purple" variant="soft" size="sm">{result.recommendationBasis}</MayoTag>],
+                            ["Sample count", `${result.sampleCount}건`],
+                            ["Reference year range", result.earliestSourceYear !== null && result.latestSourceYear !== null ? `${result.earliestSourceYear}~${result.latestSourceYear} (${result.distinctYearsUsed}개 연도)` : "—"],
+                        ]} />
+                    </div>
+                    <RecommendationCheckCard result={result} />
+                </div>
+            ),
+        },
+        {
+            value: "reliability",
+            label: `신뢰도 상세 — ${RELIABILITY_LABEL[result.reliabilityTier]}`,
+            children: <ReliabilityCard result={result} />,
+        },
+        ...(seriesDisplay.kind === "SERIES_APPLIED" ? [{
+            value: "series",
+            label: "Series 경로 상세",
+            children: <SeriesHistoryCard seriesDisplay={seriesDisplay as Extract<ReturnType<typeof resolveSeriesDisplayState>, { kind: "SERIES_APPLIED" }>} />,
+        }] : []),
+        ...(seriesDisplay.kind === "SERIES_APPLIED" && result.seriesHistoryDetail ? [{
+            value: "series-history",
+            label: "동일 축제 과거 이력",
+            children: <SeriesHistoryDetailCard detail={result.seriesHistoryDetail} result={result} />,
+        }] : []),
+        ...(seriesDisplay.kind === "SERIES_APPLIED" ? [{
+            value: "future-year",
+            label: "Future-year 진단",
+            children: <FutureYearSafetyCard result={result} />,
+        }] : []),
+        {
+            value: "algorithm",
+            label: "알고리즘 적용값 / 데이터 사용 현황",
+            children: (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <AlgorithmValuesCard result={result} />
+                    <DataUsageCard result={result} />
+                </div>
+            ),
+        },
+        ...(result.topCandidates.length > 0 ? [{
+            value: "candidates",
+            label: `유사 축제 상위 ${result.topCandidates.length}건 (전체 ${result.sampleCount}건 중)`,
+            children: <CandidatesCard candidates={result.topCandidates} sampleCount={result.sampleCount} requestedDurationDays={requestedDurationDays} />,
+        }] : []),
+        {
+            value: "raw",
+            label: "개발자 정보 — Raw API Response",
+            children: (
+                <pre className="p-3 rounded overflow-x-auto max-h-96 overflow-y-auto text-xs" style={{ background: "var(--mayo-bg-subtle)", color: "var(--mayo-text-secondary)" }}>
+                    {JSON.stringify(result, null, 2)}
+                </pre>
+            ),
+        },
+    ];
+
     return (
-        <div className="flex flex-col gap-4">
-            {/* 6절 — 핵심 결과 4개 */}
-            <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-3">
+            {noSample && (
+                <MayoAlert type="warning">비교 가능한 유사 축제 표본 없음 (sampleCount=0) — 예상/추천 예산은 0원입니다.</MayoAlert>
+            )}
+
+            {(seriesFallbackKind === "UNMATCHED" || seriesFallbackKind === "AMBIGUOUS" || seriesFallbackKind === "NO_VALID_HISTORY") && (
+                <MayoAlert type="info">{SERIES_FALLBACK_MESSAGE[seriesFallbackKind]}</MayoAlert>
+            )}
+
+            {/* Row 1: 핵심 메트릭 4개 */}
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
                 <MetricBox label="예상 예산" value={fmt(result.estimatedBudgetKrw)} />
                 <MetricBox label="추천 계획 예산" value={fmt(result.recommendedBudgetKrw)} highlight />
                 <MetricBox label="추정 방식" value={isSeries ? "SERIES" : "PEER"} sub={ESTIMATE_BASIS_LABEL[result.estimateBasis]} />
-                <MetricBox
-                    label="신뢰도"
-                    value={RELIABILITY_LABEL[result.reliabilityTier] ?? result.reliabilityTier}
-                    reliabilityColor={RELIABILITY_BADGE_COLOR[result.reliabilityTier]}
-                />
+                <MetricBox label="신뢰도" value={RELIABILITY_LABEL[result.reliabilityTier] ?? result.reliabilityTier} reliabilityColor={RELIABILITY_BADGE_COLOR[result.reliabilityTier]} />
             </div>
 
-            {noSample && (
-                <MayoAlert type="warning">
-                    비교 가능한 유사 축제 표본을 찾지 못했습니다(sampleCount=0, fallbackLevel=NONE) — 위 예상/추천 예산은 0원입니다.
-                </MayoAlert>
-            )}
-
-            {/* 신뢰도 상세 설명 — 등급/이유/의미를 한 카드에서 (reliabilityReason은 항상 API 원문 그대로) */}
-            <ReliabilityCard result={result} />
-
-            {/* 7절 — 예산 산정 근거 */}
-            <Card title="예산 산정 근거">
-                <FieldGrid
-                    rows={[
-                        ["Estimate basis", <code key="eb">{result.estimateBasis}</code>],
-                        ["Recommendation basis", <code key="rb">{result.recommendationBasis}</code>],
-                        ["Sample count", `${result.sampleCount}건`],
-                        [
-                            "Reference year range",
-                            result.earliestSourceYear !== null && result.latestSourceYear !== null
-                                ? `${result.earliestSourceYear}~${result.latestSourceYear} (${result.distinctYearsUsed}개 연도)`
-                                : "—",
-                        ],
-                    ]}
-                />
-            </Card>
-
-            {/* 10절 — 추천 공식 검증(표시 전용, production 값을 대체하지 않음) */}
-            <RecommendationCheckCard result={result} />
-
-            {/* 8절 — Series 경로 상세(계산 경로가 SERIES일 때 가장 눈에 띄게) */}
-            {seriesDisplay.kind === "SERIES_APPLIED" && (
-                <SeriesHistoryCard seriesDisplay={seriesDisplay} />
-            )}
-
-            {/* Series 계산에 사용된 과거 축제 이력 — SERIES 경로일 때만(Peer에서는 표시하지 않음,
-                Peer는 아래 Top peer candidates 카드가 담당한다). */}
-            {seriesDisplay.kind === "SERIES_APPLIED" && result.seriesHistoryDetail && (
-                <SeriesHistoryDetailCard detail={result.seriesHistoryDetail} result={result} />
-            )}
-
-            {/* Future-Year Safety 진단 — Data Quality/Reliability와는 별개 축(20절). */}
-            {seriesDisplay.kind === "SERIES_APPLIED" && <FutureYearSafetyCard result={result} />}
-            {(seriesDisplay.kind === "UNMATCHED" || seriesDisplay.kind === "AMBIGUOUS" || seriesDisplay.kind === "NO_VALID_HISTORY") && (
-                <MayoAlert type="info">{SERIES_FALLBACK_MESSAGE[seriesDisplay.kind]}</MayoAlert>
-            )}
-
-            {/* 15절 — 알고리즘 적용값 / 11절 — 데이터 사용 현황 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <AlgorithmValuesCard result={result} />
-                <DataUsageCard result={result} />
+            {/* Row 2: 차트 3개 — Peer분포 바차트 + 연도별 비중 바차트 + 추정방식/신뢰도 도넛 */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {peerChartData.length > 0 && (
+                    <MayoCard variant="outlined" padding="sm">
+                        <p className="text-xs font-semibold mb-1">예산 분포 (억원)</p>
+                        <MayoBarChart
+                            data={peerChartData}
+                            series={[{ key: "value", label: "예산(억)", color: "#6366f1" }]}
+                            height={180}
+                            showGrid
+                        />
+                    </MayoCard>
+                )}
+                {yearWeightChartData.length > 0 && (
+                    <MayoCard variant="outlined" padding="sm">
+                        <p className="text-xs font-semibold mb-1">연도별 반영 비중 (%)</p>
+                        <MayoBarChart
+                            data={yearWeightChartData}
+                            series={[{ key: "weight", label: "비중(%)", color: "#10b981" }]}
+                            height={180}
+                            showGrid
+                        />
+                    </MayoCard>
+                )}
+                <MayoCard variant="outlined" padding="sm">
+                    <p className="text-xs font-semibold mb-1">추정 방식 / 신뢰도</p>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="flex flex-col items-center">
+                            <MayoPieChart data={basisPieData} size={100} donut showLegend />
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <MayoPieChart data={reliabilityPieData} size={100} donut />
+                            <span className="text-[10px] mt-1 font-semibold" style={{ color: "var(--mayo-text-muted)" }}>{RELIABILITY_LABEL[result.reliabilityTier]}</span>
+                        </div>
+                    </div>
+                </MayoCard>
             </div>
 
-            {/* 9절/13절 — Peer 통계(estimateBasis와 무관하게 항상 계산되어 API에 채워진다 - Series가
-                최종 추정이어도 "보조 비교"로 함께 보여준다). */}
-            <PeerStatsCard result={result} isPrimary={!isSeries} />
-
-            {/* 12절 — 연도별 반영 비중 */}
-            {result.yearWeightBreakdown.length > 0 && <YearWeightCard result={result} />}
-
-            {/* 17절 — Top peer candidates */}
-            {result.topCandidates.length > 0 && (
-                <CandidatesCard candidates={result.topCandidates} sampleCount={result.sampleCount} requestedDurationDays={requestedDurationDays} />
+            {/* Row 3: Peer 핵심 통계 — 한 줄 태그 */}
+            {result.sampleCount > 0 && (
+                <MayoCard variant="outlined" padding="sm">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold">Peer 통계</span>
+                        <MayoTag color="gray" variant="outline" size="sm">표본 {result.sampleCount}건</MayoTag>
+                        <MayoTag color="gray" variant="outline" size="sm">유사도 {(result.averageSimilarity * 100).toFixed(1)}%</MayoTag>
+                        <MayoTag color="blue" variant="soft" size="sm">P25 {fmtEok(result.p25Krw)}</MayoTag>
+                        <MayoTag color="blue" variant="soft" size="sm">P50 {fmtEok(result.p50Krw)}</MayoTag>
+                        <MayoTag color="purple" variant="soft" size="sm">P60 {fmtEok(result.p60Krw)}</MayoTag>
+                        <MayoTag color="blue" variant="soft" size="sm">P75 {fmtEok(result.p75Krw)}</MayoTag>
+                        <MayoTag color="green" variant="solid" size="sm">추천 {fmtEok(result.recommendedBudgetKrw)}</MayoTag>
+                        <MayoTag color="gray" variant="outline" size="sm">Fallback {FALLBACK_LEVEL_LABEL[result.fallbackLevel as FallbackLevel] ?? result.fallbackLevel}</MayoTag>
+                    </div>
+                </MayoCard>
             )}
 
-            {/* 20절 — Raw JSON(기본 닫힘) */}
-            <MayoCard variant="outlined" padding="sm">
-                <details className="text-xs">
-                    <summary className="cursor-pointer font-medium" style={{ color: "var(--mayo-text-muted)" }}>개발자 정보 ▸ Raw API Response</summary>
-                    <pre className="mt-2 p-3 rounded overflow-x-auto max-h-96 overflow-y-auto" style={{ background: "var(--mayo-bg-subtle)", color: "var(--mayo-text-secondary)" }}>
-                        {JSON.stringify(result, null, 2)}
-                    </pre>
-                </details>
-            </MayoCard>
+            {/* Row 4: 상세 섹션 — MayoAccordion */}
+            <MayoAccordion items={accordionItems} multiple bordered />
         </div>
     );
 }
@@ -876,19 +812,6 @@ function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudget
  * 태그, MIXED/MISSING이면 각각 "직접 선택"/"정보 없음"만 보여준다(내부 STABLE/MIXED/MISSING
  * 문자열 자체는 노출하지 않음).
  */
-function SeriesFieldSummaryRow({ label, status, value }: { label: string; status: "STABLE" | "MIXED" | "MISSING"; value: string | null }) {
-    const displayValue = status === "STABLE" ? value ?? "—" : status === "MIXED" ? "직접 선택" : "정보 없음";
-    return (
-        <div className="flex items-center justify-between text-xs py-0.5">
-            <span>{label}</span>
-            <span className="flex items-center gap-1.5">
-                <span className="font-medium">{displayValue}</span>
-                {status === "STABLE" && <MayoBadge color="green" variant="soft" size="sm">자동 설정</MayoBadge>}
-            </span>
-        </div>
-    );
-}
-
 function MetricBox({ label, value, sub, highlight, reliabilityColor }: { label: string; value: string; sub?: string; highlight?: boolean; reliabilityColor?: "green" | "purple" | "gray" }) {
     return (
         <MayoCard variant="outlined" padding="sm">
@@ -1017,55 +940,51 @@ function ReliabilityCard({ result }: { result: MultiYearBudgetEstimateResponse }
                 </>
             )}
 
-            {/* 분석적 표시(상세 진단 정보) */}
+            {/* 분석적 표시(상세 진단 정보) — 기본 접힘 */}
             <MayoDivider />
-            <div>
-                <p className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--mayo-text-muted)" }}>분석적 표시 (상세)</p>
-                <FieldGrid
-                    rows={[
-                        ["Reliability tier", <span key="t" className="font-semibold">{tier}</span>],
-                        ["Reliability reason", <span key="r" className="text-xs" style={{ color: "var(--mayo-text-secondary)" }}>{result.reliabilityReason}</span>],
-                        ["Estimate basis", <code key="e">{result.estimateBasis}</code>],
-                        ["Series history", seriesHistorySummary(result)],
-                        ["Fallback level", <code key="f">{FALLBACK_LEVEL_LABEL[result.fallbackLevel as FallbackLevel] ?? result.fallbackLevel}</code>],
-                    ]}
-                />
-            </div>
-
-            {/* READ-ONLY DIAGNOSTIC(G0 이후 Reliability Revalidation) — reasonKey/historical
-                dispersion/threshold를 그대로 노출한다. tier 판정식 자체를 여기서 재계산하지 않는다 -
-                전부 API가 이미 계산한 값이다. */}
-            {result.reliabilityDiagnostic && (
-                <>
-                <MayoDivider />
-                <div>
-                    <p className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--mayo-text-muted)" }}>Reliability 진단 (G0 이후 재검증)</p>
+            <details className="text-xs">
+                <summary className="cursor-pointer text-[11px] font-semibold" style={{ color: "var(--mayo-text-muted)" }}>분석적 표시 (상세) ▸</summary>
+                <div className="mt-2">
                     <FieldGrid
                         rows={[
-                            ["reasonKey", <code key="rk">{result.reliabilityDiagnostic.reasonKey}</code>],
-                            [
-                                "Historical dispersion",
-                                result.reliabilityDiagnostic.historicalDispersion !== null
-                                    ? `log(P75/P25) = ${result.reliabilityDiagnostic.historicalDispersion.toFixed(4)}`
-                                    : "— (historyCount<2, 측정 불가)",
-                            ],
-                            [
-                                "Calibration threshold",
-                                result.reliabilityDiagnostic.volatilityThreshold !== null
-                                    ? result.reliabilityDiagnostic.volatilityThreshold.toFixed(4)
-                                    : "— (calibration pool 부족)",
-                            ],
-                            ["estimateSource", result.seriesSignal.estimateSource ?? "—"],
-                            ["latestHistoricalGap", result.seriesSignal.latestHistoricalGap !== undefined ? `${result.seriesSignal.latestHistoricalGap}년` : "—"],
+                            ["Reliability tier", <span key="t" className="font-semibold">{tier}</span>],
+                            ["Reliability reason", <span key="r" className="text-xs" style={{ color: "var(--mayo-text-secondary)" }}>{result.reliabilityReason}</span>],
+                            ["Estimate basis", <code key="e">{result.estimateBasis}</code>],
+                            ["Series history", seriesHistorySummary(result)],
+                            ["Fallback level", <code key="f">{FALLBACK_LEVEL_LABEL[result.fallbackLevel as FallbackLevel] ?? result.fallbackLevel}</code>],
                         ]}
                     />
-                    <p className="text-[10px] mt-1.5" style={{ color: "var(--mayo-text-muted)" }}>
-                        G0 이후 backtest 연구 결과: HIGH/MEDIUM의 정확도(MdAPE) 차이는 작아졌지만, historical dispersion(변동성)
-                        자체는 여전히 뚜렷하게 구분됩니다 — 신뢰도는 정확도 등급이 아니라 과거 데이터 근거의 안정성 지표입니다.
-                    </p>
                 </div>
-                </>
-            )}
+
+                {result.reliabilityDiagnostic && (
+                    <div className="mt-3">
+                        <p className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--mayo-text-muted)" }}>Reliability 진단 (G0 이후 재검증)</p>
+                        <FieldGrid
+                            rows={[
+                                ["reasonKey", <code key="rk">{result.reliabilityDiagnostic.reasonKey}</code>],
+                                [
+                                    "Historical dispersion",
+                                    result.reliabilityDiagnostic.historicalDispersion !== null
+                                        ? `log(P75/P25) = ${result.reliabilityDiagnostic.historicalDispersion.toFixed(4)}`
+                                        : "— (historyCount<2, 측정 불가)",
+                                ],
+                                [
+                                    "Calibration threshold",
+                                    result.reliabilityDiagnostic.volatilityThreshold !== null
+                                        ? result.reliabilityDiagnostic.volatilityThreshold.toFixed(4)
+                                        : "— (calibration pool 부족)",
+                                ],
+                                ["estimateSource", result.seriesSignal.estimateSource ?? "—"],
+                                ["latestHistoricalGap", result.seriesSignal.latestHistoricalGap !== undefined ? `${result.seriesSignal.latestHistoricalGap}년` : "—"],
+                            ]}
+                        />
+                        <p className="text-[10px] mt-1.5" style={{ color: "var(--mayo-text-muted)" }}>
+                            G0 이후 backtest 연구 결과: HIGH/MEDIUM의 정확도(MdAPE) 차이는 작아졌지만, historical dispersion(변동성)
+                            자체는 여전히 뚜렷하게 구분됩니다 — 신뢰도는 정확도 등급이 아니라 과거 데이터 근거의 안정성 지표입니다.
+                        </p>
+                    </div>
+                )}
+            </details>
 
             <p className="text-[11px] mt-3 italic" style={{ color: "var(--mayo-text-muted)" }}>
                 신뢰도는 &lsquo;이 예산이 맞을 확률&rsquo;이 아니라, 이 추정에 사용한 데이터 근거의 강도를 나타냅니다. 숫자 % confidence로 환산되는 값이 아닙니다.
@@ -1341,33 +1260,30 @@ function SeriesHistoryDetailCard({ detail, result }: { detail: SeriesHistoryDeta
                 </table>
             </div>
 
-            <p className="text-[11px] mt-2" style={{ color: "var(--mayo-text-muted)" }}>
-                개최기간은 참고 정보이며 현재 Series 예상/추천 예산 산식(×1.05)에는 직접 사용되지 않습니다 — 표에 기간이 보인다고 duration이 반영된 것은 아닙니다.
-            </p>
-            {detail.estimateSource === "LATEST" && eligibleRecords.length > pointEstimateRecords.length && (
-                <p className="text-[11px] mt-1" style={{ color: "var(--mayo-text-muted)" }}>
-                    &ldquo;유효 이력(참고)&rdquo; 행은 own-history 계산 대상에서 제외된 것이 아닙니다 — 최근 이력(gap≤2년)을 기준값으로 쓰는 경우에도 나머지 유효 이력은 참고용으로 계속 표시됩니다.
-                </p>
-            )}
-            {excludedRecords.length > 0 && (
-                <p className="text-[11px] mt-1" style={{ color: "var(--mayo-text-muted)" }}>
-                    제외된 record는 이 series의 유효 record들과 지역·시군구·정규화된 축제명이 같은 원본 데이터 중 계산 대상에서 걸러진 것을 최선의 근사치로 보여줍니다(회차/연도 표기 차이는 정규화 후 비교) — series 매칭 판정 자체를 다시 내린 것은 아닙니다.
-                </p>
-            )}
-
-            <MayoDivider />
-            <div>
-                <p className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--mayo-text-muted)" }}>estimate parity 검증 (표시 전용)</p>
-                <div className="font-mono text-xs rounded p-3 flex flex-col gap-0.5" style={{ background: "var(--mayo-bg-subtle)" }}>
-                    <div>
-                        {detail.estimateSource === "LATEST" ? "예상 예산 기준값(최근 이력)" : `계산에 사용된 ${detail.cpiFullyAvailable ? "CPI 보정" : "원본(nominal)"} 예산 ${pointEstimateValues.length}건의 median`}
-                    </div>
-                    <div>→ {computedEstimate !== null ? fmt(computedEstimate) : "—"} <span style={{ color: "var(--mayo-text-muted)" }}>(표 기준 재계산값)</span></div>
-                    <div className="pt-1 mt-1" style={{ borderTop: "1px solid var(--mayo-border)" }}>API 예상 예산(estimatedBudgetKrw) = {fmt(result.estimatedBudgetKrw)}</div>
-                    <div>일치 = {estimateMatchesApi ? "✓" : "✗"}</div>
-                    <div className="mt-1" style={{ color: "var(--mayo-text-muted)" }}>추천 계획 예산(× 1.05) 검산은 위 &ldquo;추천 공식 검증&rdquo; 카드를 참고하세요.</div>
+            <details className="mt-2 text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
+                <summary className="cursor-pointer font-medium">표 해석 안내 및 parity 검증 ▸</summary>
+                <div className="mt-1 flex flex-col gap-1">
+                    <p>개최기간은 참고 정보이며 Series 예산 산식(×1.05)에는 직접 사용되지 않습니다.</p>
+                    {detail.estimateSource === "LATEST" && eligibleRecords.length > pointEstimateRecords.length && (
+                        <p>&ldquo;유효 이력(참고)&rdquo; 행은 제외된 것이 아닙니다 — 최근 이력 기준값 외 나머지는 참고용으로 표시됩니다.</p>
+                    )}
+                    {excludedRecords.length > 0 && (
+                        <p>제외된 record는 정규화된 축제명 기준 매칭 후 걸러진 것의 근사치입니다.</p>
+                    )}
                 </div>
-            </div>
+                <MayoDivider />
+                <div>
+                    <p className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--mayo-text-muted)" }}>estimate parity 검증 (표시 전용)</p>
+                    <div className="font-mono text-xs rounded p-3 flex flex-col gap-0.5" style={{ background: "var(--mayo-bg-subtle)" }}>
+                        <div>
+                            {detail.estimateSource === "LATEST" ? "예상 예산 기준값(최근 이력)" : `${detail.cpiFullyAvailable ? "CPI 보정" : "원본(nominal)"} 예산 ${pointEstimateValues.length}건의 median`}
+                        </div>
+                        <div>→ {computedEstimate !== null ? fmt(computedEstimate) : "—"} <span style={{ color: "var(--mayo-text-muted)" }}>(재계산값)</span></div>
+                        <div className="pt-1 mt-1" style={{ borderTop: "1px solid var(--mayo-border)" }}>API estimatedBudgetKrw = {fmt(result.estimatedBudgetKrw)}</div>
+                        <div>일치 = {estimateMatchesApi ? "✓" : "✗"}</div>
+                    </div>
+                </div>
+            </details>
         </Card>
     );
 }
@@ -1431,9 +1347,6 @@ function AlgorithmValuesCard({ result }: { result: MultiYearBudgetEstimateRespon
                     ["dataQualityV3 (legacy, 참고용)", `${result.dataQualityV3.toFixed(1)}점`],
                 ]}
             />
-            <p className="text-[11px] mt-3" style={{ color: "var(--mayo-text-muted)" }}>
-                Fallback level/Average similarity는 Series/Peer 여부와 무관하게 항상 계산됩니다(Peer 후보 탐색이 estimate basis와 별개로 항상 실행되기 때문) — Series 경로에서도 &ldquo;—&rdquo;로 비지 않습니다.
-            </p>
         </Card>
     );
 }
@@ -1455,76 +1368,6 @@ function DataUsageCard({ result }: { result: MultiYearBudgetEstimateResponse }) 
     );
 }
 
-function PeerStatsCard({ result, isPrimary }: { result: MultiYearBudgetEstimateResponse; isPrimary: boolean }) {
-    if (result.sampleCount === 0) return null;
-    return (
-        <Card title={isPrimary ? "Peer 통계 (최종 추정 근거)" : "Peer 통계 (보조 비교 — 유사 축제 참고 범위)"}>
-            <div className="flex items-center gap-3 text-xs mb-3 flex-wrap" style={{ color: "var(--mayo-text-muted)" }}>
-                <span>Fallback level: <code>{FALLBACK_LEVEL_LABEL[result.fallbackLevel as FallbackLevel] ?? result.fallbackLevel}</code></span>
-                <span>최종 비교 축제: {result.sampleCount}개</span>
-                <span>평균 유사도: {(result.averageSimilarity * 100).toFixed(1)}%</span>
-            </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-                {isPrimary ? (
-                    <div className="flex justify-between col-span-2">
-                        <span style={{ color: "var(--mayo-text-muted)" }}>가중 기하평균</span>
-                        <span className="font-semibold">{fmtEok(result.estimatedBudgetKrw)} <span className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>← 예상 예산</span></span>
-                    </div>
-                ) : (
-                    <div className="flex justify-between col-span-2" style={{ color: "var(--mayo-text-muted)" }}>
-                        <span>가중 기하평균</span>
-                        <span>— (Series 경로에서는 API가 Peer 기하평균을 별도로 내려주지 않음)</span>
-                    </div>
-                )}
-                <div className="flex justify-between">
-                    <span style={{ color: "var(--mayo-text-muted)" }}>가중 평균</span>
-                    <span>{fmtEok(result.weightedAverageBudgetKrw)}</span>
-                </div>
-                <div className="flex justify-between">
-                    <span style={{ color: "var(--mayo-text-muted)" }}>P50</span>
-                    <span>{fmtEok(result.p50Krw)}</span>
-                </div>
-                <div className="flex justify-between">
-                    <span style={{ color: "var(--mayo-text-muted)" }}>P25</span>
-                    <span>{fmtEok(result.p25Krw)}</span>
-                </div>
-                <div className="flex justify-between">
-                    <span style={{ color: "var(--mayo-text-muted)" }}>P60</span>
-                    <span>{fmtEok(result.p60Krw)}</span>
-                </div>
-                <div className="flex justify-between">
-                    <span style={{ color: "var(--mayo-text-muted)" }}>P75</span>
-                    <span>{fmtEok(result.p75Krw)}</span>
-                </div>
-            </div>
-            <p className="text-xs mt-3" style={{ color: "var(--mayo-text-muted)" }}>
-                유사 축제 참고 범위: {fmt(result.p25Krw)} ~ {fmt(result.p75Krw)}
-            </p>
-        </Card>
-    );
-}
-
-function YearWeightCard({ result }: { result: MultiYearBudgetEstimateResponse }) {
-    const maxWeightShare = Math.max(0, ...result.yearWeightBreakdown.map((y) => y.weightShare));
-    return (
-        <Card title="연도별 반영 비중">
-            <div className="flex flex-col gap-1.5">
-                {result.yearWeightBreakdown.map((y) => (
-                    <div key={y.year} className="flex items-center gap-2 text-xs">
-                        <span className="w-10" style={{ color: "var(--mayo-text-muted)" }}>{y.year}</span>
-                        <div className="flex-1 rounded h-3 overflow-hidden" style={{ background: "var(--mayo-bg-subtle)" }}>
-                            <div
-                                className="h-full rounded"
-                                style={{ width: `${maxWeightShare > 0 ? (y.weightShare / maxWeightShare) * 100 : 0}%`, background: "var(--mayo-primary, #10b981)" }}
-                            />
-                        </div>
-                        <span className="w-24 text-right" style={{ color: "var(--mayo-text-muted)" }}>{(y.weightShare * 100).toFixed(1)}% ({y.candidateCount}건)</span>
-                    </div>
-                ))}
-            </div>
-        </Card>
-    );
-}
 
 /**
  * PHASE 7 — production 코드(lib/multiyear/baseline-estimator.ts의 selectFinalSample/
@@ -1558,81 +1401,32 @@ function CandidatesCard({
     sampleCount: number;
     requestedDurationDays: number | null;
 }) {
-    const adjustedHeader = requestedDurationDays !== null ? `${requestedDurationDays}일 기준 조정 예산` : "조정 예산";
+    const adjustedHeader = requestedDurationDays !== null ? `${requestedDurationDays}일 기준 조정` : "조정 예산";
+    const candidateColumns = [
+        { key: "festivalName", label: "축제명" },
+        { key: "sourceYear", label: "연도", width: "55px" },
+        { key: "region", label: "지역", render: (_v: unknown, row: Record<string, unknown>) => `${(row.region as string) ?? "—"}${row.district ? `/${row.district}` : ""}` },
+        { key: "festivalType", label: "유형" },
+        { key: "durationDays", label: "기간", render: (v: unknown) => (v as number | null) !== null ? `${v}일` : "—" },
+        { key: "originalBudgetKrw", label: "원본 예산", render: (v: unknown) => fmt(v as number) },
+        { key: "durationAdjustedBudgetKrw", label: adjustedHeader, render: (v: unknown) => fmt(v as number) },
+        { key: "similarity", label: "유사도", render: (v: unknown) => `${((v as number) * 100).toFixed(1)}%` },
+        { key: "finalWeight", label: "Weight", render: (v: unknown) => (v as number).toFixed(3) },
+    ];
+
     return (
-        <Card title={`계산에 사용된 유사 축제 표본 중 상위 ${candidates.length}건`}>
-            <p className="text-xs mb-2" style={{ color: "var(--mayo-text-secondary)" }}>
-                현재 입력 조건과 유사한 과거 축제를 유사도 순으로 보여줍니다. 최종 계산(예상 예산·추천 예산·P25~P75 등)에는 아래
-                표에 보이는 {candidates.length}건만이 아니라, 선택된 전체 Peer 후보군 {sampleCount}건이 사용됩니다.
+        <div className="flex flex-col gap-2">
+            <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>
+                유사도 순 상위 {candidates.length}건 표시 · 전체 {sampleCount}건으로 통계 계산
             </p>
-            <p className="text-[11px] mb-3" style={{ color: "var(--mayo-text-muted)" }}>
-                정렬 기준: 축제 유형·지역·장소 유형·개최기간의 유사도를 종합한 similarity가 높은 순(통계 가중치 = similarity²
-                이므로 사실상 같은 순서입니다).
-            </p>
-            <div className="overflow-x-auto max-h-72 overflow-y-auto">
-                <table className="w-full text-xs border-collapse">
-                    <thead className="sticky top-0" style={{ background: "var(--mayo-surface)" }}>
-                        <tr style={{ background: "var(--mayo-bg-subtle)" }}>
-                            <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>축제명</th>
-                            <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>연도</th>
-                            <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>지역</th>
-                            <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>유형</th>
-                            <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>개최기간</th>
-                            <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>과거 계획 예산</th>
-                            <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>{adjustedHeader}</th>
-                            <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>유사도</th>
-                            <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>weight</th>
-                            <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>fallback 단계</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {candidates.map((c, i) => (
-                            <tr key={i} style={{ borderBottom: "1px solid var(--mayo-border)" }}>
-                                <td className="px-2 py-1.5">{c.festivalName}</td>
-                                <td className="px-2 py-1.5" style={{ color: "var(--mayo-text-muted)" }}>{c.sourceYear}</td>
-                                <td className="px-2 py-1.5" style={{ color: "var(--mayo-text-muted)" }}>{c.region ?? "—"}{c.district ? `/${c.district}` : ""}</td>
-                                <td className="px-2 py-1.5" style={{ color: "var(--mayo-text-muted)" }}>{c.festivalType}</td>
-                                <td className="px-2 py-1.5 text-right" style={{ color: "var(--mayo-text-muted)" }}>
-                                    {c.durationDays !== null ? `${c.durationDays}일` : "정보 없음"}
-                                </td>
-                                <td className="px-2 py-1.5 text-right">{fmt(c.originalBudgetKrw)}</td>
-                                <td className="px-2 py-1.5 text-right">{fmt(c.durationAdjustedBudgetKrw)}</td>
-                                <td className="px-2 py-1.5 text-right" style={{ color: "var(--mayo-text-muted)" }}>{(c.similarity * 100).toFixed(1)}%</td>
-                                <td className="px-2 py-1.5 text-right" style={{ color: "var(--mayo-text-muted)" }}>{c.finalWeight.toFixed(3)}</td>
-                                <td className="px-2 py-1.5" style={{ color: "var(--mayo-text-muted)" }}>{c.fallbackStage ?? "—"}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-            <div className="mt-2 flex flex-col gap-1" style={{ color: "var(--mayo-text-muted)" }}>
-                <p className="text-[11px]">
-                    과거 축제 기간이 현재 계획({requestedDurationDays !== null ? `${requestedDurationDays}일` : "입력한 개최일수"})보다
-                    짧으면 조정 예산이 커지고, 길면 작아질 수 있습니다(기간이 같으면 조정 예산 = 과거 계획 예산). 다만 기간 차이가
-                    아주 클 때는 보정 비율 자체가 0.5~2.0배 범위로 제한됩니다.
-                </p>
-                <p className="text-[11px]">
-                    개최기간 정보가 없는(&ldquo;정보 없음&rdquo;) 과거 축제는 기간 보정을 적용하지 않습니다 — 조정 예산이 과거 계획
-                    예산과 동일하게 표시됩니다.
-                </p>
-                <p className="text-[11px]">
-                    유형/지역/장소/기간 각각의 세부 유사도 점수(sub-score)는 현재 API가 반환하지 않습니다 — 종합 유사도(similarity)와
-                    최종 반영 weight(finalWeight)만 표시됩니다.
-                </p>
-                <p className="text-[11px]">
-                    이 표의 과거 계획 예산/조정 예산은 원본 값입니다. 실제 통계 계산(예상 예산·P25~P75 등)에는 이상치를 완화하기
-                    위한 winsorize(같은 유형 축제 전체 기준 상하위 5% 클리핑) 처리가 조정 예산에 추가로 한 번 더 적용된 값이
-                    쓰이며, 그 값은 이 표에 별도로 표시되지 않습니다.
-                </p>
-            </div>
-            <details className="mt-2 text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
-                <summary className="cursor-pointer">정렬 세부 규칙(개발자용)</summary>
-                <p className="mt-1">
-                    유사도(정확히는 그 제곱값인 통계 가중치)가 완전히 같은 후보끼리는 재현성을 위한 결정적 규칙(원본 데이터의
-                    소스 파일·시트·행 위치 기준)으로 순서만 고정합니다 — &ldquo;더 좋은 후보&rdquo;라는 의미는 아닙니다.
-                </p>
-            </details>
-        </Card>
+            <MayoTable
+                columns={candidateColumns}
+                data={candidates.map((c, i) => ({ ...c, _idx: i })) as unknown as Record<string, unknown>[]}
+                rowKey="_idx"
+                striped
+                bordered
+            />
+        </div>
     );
 }
 
@@ -1649,8 +1443,8 @@ const AUDIT_SEVERITY_TAB_OPTIONS: { value: DataQualityAuditSeverity | "ALL"; lab
  * `GET /api/v1/data-quality-audit`을 처음 펼쳤을 때만 호출한다(페이지 로드마다 자동 호출하지
  * 않음).
  */
-function GlobalDataQualityAuditSection() {
-    const [opened, setOpened] = useState(false);
+/** MayoAccordion용 Inner — 마운트 시 자동 fetch. */
+function GlobalDataQualityAuditInner() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<DataQualityAuditResponse | null>(null);
@@ -1659,239 +1453,106 @@ function GlobalDataQualityAuditSection() {
     const [q, setQ] = useState("");
 
     useEffect(() => {
-        if (!opened) return;
         let cancelled = false;
-        // 기존 seriesSearchText 검색 effect(위 234줄)와 동일 패턴 — setState를 effect 본문에서
-        // 바로 부르지 않고 debounce 콜백 안에서 부른다(cascading render 방지 + q 자유입력 debounce).
         const timer = setTimeout(() => {
             setLoading(true);
             setError(null);
-            fetchDataQualityAudit({
-                severity,
-                reason: reason === "ALL" ? undefined : reason,
-                q: q.trim() || undefined,
-                limit: 50,
-            })
-                .then((res) => {
-                    if (!cancelled) setData(res);
-                })
-                .catch((err) => {
-                    if (!cancelled) setError(err instanceof Error ? err.message : "데이터 품질 감사 조회에 실패했습니다.");
-                })
-                .finally(() => {
-                    if (!cancelled) setLoading(false);
-                });
+            fetchDataQualityAudit({ severity, reason: reason === "ALL" ? undefined : reason, q: q.trim() || undefined, limit: 50 })
+                .then((res) => { if (!cancelled) setData(res); })
+                .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "데이터 품질 감사 조회 실패"); })
+                .finally(() => { if (!cancelled) setLoading(false); });
         }, SEARCH_DEBOUNCE_MS);
+        return () => { cancelled = true; clearTimeout(timer); };
+    }, [severity, reason, q]);
 
-        return () => {
-            cancelled = true;
-            clearTimeout(timer);
-        };
-    }, [opened, severity, reason, q]);
+    const auditTableColumns = [
+        { key: "canonicalSeriesName", label: "축제" },
+        { key: "datasetYear", label: "연도", width: "60px" },
+        { key: "budgetKrw", label: "예산", render: (v: unknown) => (v as number | null) !== null ? fmt(v as number) : "—" },
+        { key: "previousBudgetKrw", label: "이전 예산", render: (v: unknown) => (v as number | null) !== null ? fmt(v as number) : "—" },
+        { key: "budgetQualityFlag", label: "기존 flag", render: (v: unknown) => (v as string) ?? "—" },
+        { key: "severity", label: "진단", render: (_v: unknown, row: Record<string, unknown>) => <AuditRecordDetail r={row as unknown as SeriesDataQualityAuditRecord} /> },
+    ];
 
     return (
-        <MayoCard variant="outlined" padding="sm">
-        <details className="text-xs" onToggle={(e) => setOpened(e.currentTarget.open)}>
-            <summary className="cursor-pointer font-medium" style={{ color: "var(--mayo-text-muted)" }}>전체 데이터 품질 감사(Series Data Quality Audit)</summary>
-            <div className="mt-3 flex flex-col gap-3">
-                <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
-                    데이터 품질 진단은 오류 확정이 아니라 검토 우선순위입니다. 표시된 값은 자동 수정되거나 예산 계산에서 제외되지 않습니다.
-                </p>
-
-                {opened && loading && !data && <MayoLoadingSpinner size="sm" color="blue" label="불러오는 중..." />}
-                {error && <MayoAlert type="error">{error}</MayoAlert>}
-
-                {data && (
-                    <>
-                        <p className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>
-                            대상 범위: {data.auditScope.description} ({data.auditScope.earliestDatasetYear}~{data.auditScope.latestDatasetYear})
-                        </p>
-
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            <MiniStat label="감사 대상" value={`${data.summary.auditPoolRecordCount.toLocaleString()}건`} />
-                            <MiniStat
-                                label="검토 필요"
-                                value={`${data.summary.reviewRequiredCount.toLocaleString()}건 (${((data.summary.reviewRequiredCount / data.summary.auditPoolRecordCount) * 100).toFixed(1)}%)`}
-                            />
-                            <MiniStat label="HIGH" value={`${data.summary.highCount.toLocaleString()}건`} />
-                            <MiniStat label="MEDIUM" value={`${data.summary.mediumCount.toLocaleString()}건`} />
-                            <MiniStat label="연도간 변화 ≥10배" value={`${data.summary.yearlyChangeAtLeast10xCount.toLocaleString()}건`} />
-                            <MiniStat label="≥20배" value={`${data.summary.yearlyChangeAtLeast20xCount.toLocaleString()}건`} />
-                            <MiniStat label="≥100배" value={`${data.summary.yearlyChangeAtLeast100xCount.toLocaleString()}건`} />
-                            <MiniStat label="구성 합계 불일치" value={`${data.summary.componentMismatchCount.toLocaleString()}건`} />
+        <div className="flex flex-col gap-3 text-xs">
+            <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
+                데이터 품질 진단은 오류 확정이 아니라 검토 우선순위입니다.
+            </p>
+            {loading && !data && <MayoLoadingSpinner size="sm" color="blue" label="불러오는 중..." />}
+            {error && <MayoAlert type="error">{error}</MayoAlert>}
+            {data && (
+                <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <MiniStat label="감사 대상" value={`${data.summary.auditPoolRecordCount.toLocaleString()}건`} />
+                        <MiniStat label="검토 필요" value={`${data.summary.reviewRequiredCount.toLocaleString()}건 (${((data.summary.reviewRequiredCount / data.summary.auditPoolRecordCount) * 100).toFixed(1)}%)`} />
+                        <MiniStat label="HIGH" value={`${data.summary.highCount.toLocaleString()}건`} />
+                        <MiniStat label="MEDIUM" value={`${data.summary.mediumCount.toLocaleString()}건`} />
+                    </div>
+                    <MayoDivider />
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex gap-1">
+                            {AUDIT_SEVERITY_TAB_OPTIONS.map((opt) => (
+                                <MayoBtn key={opt.value} type="button" onClick={() => setSeverity(opt.value)} variant={severity === opt.value ? "primary" : "secondary"} color="green" size="xs">{opt.label}</MayoBtn>
+                            ))}
                         </div>
-
-                        <MayoDivider />
-                        <div className="flex flex-wrap items-center gap-2">
-                            <div className="flex gap-1">
-                                {AUDIT_SEVERITY_TAB_OPTIONS.map((opt) => (
-                                    <MayoBtn
-                                        key={opt.value}
-                                        type="button"
-                                        onClick={() => setSeverity(opt.value)}
-                                        variant={severity === opt.value ? "primary" : "secondary"}
-                                        color="green"
-                                        size="xs"
-                                    >
-                                        {opt.label}
-                                    </MayoBtn>
-                                ))}
-                            </div>
-                            <MayoSelect
-                                size="sm"
-                                value={reason}
-                                onChange={(e) => setReason(e.target.value as DataQualityAuditReason | "ALL")}
-                                options={[
-                                    { value: "ALL", label: "reason 전체" },
-                                    ...(Object.keys(AUDIT_REASON_LABEL) as DataQualityAuditReason[]).map((r) => ({ value: r, label: AUDIT_REASON_LABEL[r] })),
-                                ]}
-                            />
-                            <div className="flex-1 min-w-[8rem]">
-                                <MayoInput
-                                    type="text"
-                                    size="sm"
-                                    placeholder="축제명 검색"
-                                    value={q}
-                                    onChange={(e) => setQ(e.target.value)}
-                                />
-                            </div>
+                        <MayoSelect size="sm" value={reason} onChange={(e) => setReason(e.target.value as DataQualityAuditReason | "ALL")} options={[{ value: "ALL", label: "reason 전체" }, ...(Object.keys(AUDIT_REASON_LABEL) as DataQualityAuditReason[]).map((r) => ({ value: r, label: AUDIT_REASON_LABEL[r] }))]} />
+                        <div className="flex-1 min-w-[8rem]">
+                            <MayoInput type="text" size="sm" placeholder="축제명 검색" value={q} onChange={(e) => setQ(e.target.value)} />
                         </div>
-
-                        <p className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>
-                            {data.matchedCount.toLocaleString()}건 중 {data.returnedCount.toLocaleString()}건 표시(HIGH 먼저 → 변화 비율 큰 순 → 연도 → 축제명)
-                        </p>
-
-                        <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                            <table className="w-full text-[11px] border-collapse">
-                                <thead className="sticky top-0" style={{ background: "var(--mayo-surface)" }}>
-                                    <tr style={{ background: "var(--mayo-bg-subtle)" }}>
-                                        <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>축제</th>
-                                        <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>연도</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>예산</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>이전 예산</th>
-                                        <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>기존 flag</th>
-                                        <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>진단</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {data.anomalies.map((r) => (
-                                        <tr key={r.recordId} style={{ borderBottom: "1px solid var(--mayo-border)" }}>
-                                            <td className="px-2 py-1.5">{r.canonicalSeriesName}</td>
-                                            <td className="px-2 py-1.5">{r.datasetYear}</td>
-                                            <td className="px-2 py-1.5 text-right">{r.budgetKrw !== null ? fmt(r.budgetKrw) : "—"}</td>
-                                            <td className="px-2 py-1.5 text-right">{r.previousBudgetKrw !== null ? fmt(r.previousBudgetKrw) : "—"}</td>
-                                            <td className="px-2 py-1.5" style={{ color: "var(--mayo-text-muted)" }}>{r.budgetQualityFlag ?? "—"}</td>
-                                            <td className="px-2 py-1.5"><AuditRecordDetail r={r} /></td>
-                                        </tr>
-                                    ))}
-                                    {data.anomalies.length === 0 && (
-                                        <tr>
-                                            <td colSpan={6} className="px-2 py-3 text-center" style={{ color: "var(--mayo-text-muted)" }}>조건에 맞는 record가 없습니다.</td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </>
-                )}
-            </div>
-        </details>
-        </MayoCard>
+                    </div>
+                    <p className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>
+                        {data.matchedCount.toLocaleString()}건 중 {data.returnedCount.toLocaleString()}건 표시
+                    </p>
+                    <MayoTable columns={auditTableColumns} data={data.anomalies as unknown as Record<string, unknown>[]} rowKey="recordId" striped bordered emptyText="조건에 맞는 record가 없습니다." />
+                </>
+            )}
+        </div>
     );
 }
 
-/**
- * G0 이후 Reliability Revalidation — READ-ONLY DIAGNOSTIC. leakage-safe 2024~2026 fold
- * backtest(`/api/v1/reliability-audit`)의 사후 집계만 표시한다. production reliability
- * tier/threshold를 이 화면에서 재계산하거나 바꾸지 않는다 - `GlobalDataQualityAuditSection`과
- * 동일하게 처음 펼쳤을 때만 fetch한다.
- */
-function GlobalReliabilityAuditSection() {
-    const [opened, setOpened] = useState(false);
-    const [loading, setLoading] = useState(false);
+/** MayoAccordion용 Inner — 마운트 시 자동 fetch (한 번만). */
+function GlobalReliabilityAuditInner() {
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [data, setData] = useState<ReliabilityAuditResponse | null>(null);
 
     useEffect(() => {
-        if (!opened || data !== null) return; // 한 번 불러오면 재사용(backtest는 dataRevision 바뀌기 전까진 고정값).
         let cancelled = false;
-        const timer = setTimeout(() => {
-            setLoading(true);
-            setError(null);
-            fetchReliabilityAudit()
-                .then((res) => {
-                    if (!cancelled) setData(res);
-                })
-                .catch((err) => {
-                    if (!cancelled) setError(err instanceof Error ? err.message : "Reliability 감사 조회에 실패했습니다.");
-                })
-                .finally(() => {
-                    if (!cancelled) setLoading(false);
-                });
-        }, 0);
-        return () => {
-            cancelled = true;
-            clearTimeout(timer);
-        };
-    }, [opened, data]);
+        fetchReliabilityAudit()
+            .then((res) => { if (!cancelled) setData(res); })
+            .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "Reliability 감사 조회 실패"); })
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, []);
 
     const fmtPct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(2)}%`);
     const fmtNum = (v: number | null) => (v === null ? "—" : v.toFixed(4));
 
+    const reliabilityTableColumns = [
+        { key: "tier", label: "Tier", render: (v: unknown) => <span className="font-semibold">{v as string}</span> },
+        { key: "n", label: "n", render: (v: unknown) => (v as number).toLocaleString() },
+        { key: "estimateMdApe", label: "Est. MdAPE", render: (v: unknown) => fmtPct(v as number | null) },
+        { key: "estimateP90Ape", label: "P90", render: (v: unknown) => fmtPct(v as number | null) },
+        { key: "estimateP95Ape", label: "P95", render: (v: unknown) => fmtPct(v as number | null) },
+        { key: "recommendationMdApe", label: "Rec. MdAPE", render: (v: unknown) => fmtPct(v as number | null) },
+        { key: "historicalDispersionMedian", label: "Dispersion median", render: (v: unknown) => fmtNum(v as number | null) },
+        { key: "singleHistoryCount", label: "Single/Multi", render: (_v: unknown, row: Record<string, unknown>) => `${row.singleHistoryCount}/${row.multiHistoryCount}` },
+    ];
+
     return (
-        <MayoCard variant="outlined" padding="sm">
-        <details className="text-xs" onToggle={(e) => setOpened(e.currentTarget.open)}>
-            <summary className="cursor-pointer font-medium" style={{ color: "var(--mayo-text-muted)" }}>전체 Reliability 감사(G0 이후 재검증, leakage-safe backtest)</summary>
-            <div className="mt-3 flex flex-col gap-3">
-                <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
-                    신뢰도는 &lsquo;이 예산이 맞을 확률&rsquo;이 아니라, 이 추정에 사용한 동일 축제 과거 데이터 근거의 안정성/강도를 나타냅니다.
-                    이 backtest는 2024~2026 leakage-safe fold의 사후 집계이며 production reliability 판정식을 전혀 바꾸지 않습니다.
-                </p>
-
-                {opened && loading && !data && <MayoLoadingSpinner size="sm" color="blue" label="불러오는 중..." />}
-                {error && <MayoAlert type="error">{error}</MayoAlert>}
-
-                {data && (
-                    <>
-                        <p className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>fold: {data.summary.foldYears.join("/")} · Series n={data.summary.seriesN.toLocaleString()}</p>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-[11px] border-collapse">
-                                <thead>
-                                    <tr style={{ background: "var(--mayo-bg-subtle)" }}>
-                                        <th className="text-left px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>Tier</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>n</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>Estimate MdAPE</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>P90</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>P95</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>Recommendation MdAPE</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>historical dispersion median</th>
-                                        <th className="text-right px-2 py-1.5" style={{ borderBottom: "1px solid var(--mayo-border)" }}>single/multi history</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {data.summary.tiers.map((t) => (
-                                        <tr key={t.tier} style={{ borderBottom: "1px solid var(--mayo-border)" }}>
-                                            <td className="px-2 py-1.5 font-semibold">{t.tier}</td>
-                                            <td className="px-2 py-1.5 text-right">{t.n.toLocaleString()}</td>
-                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.estimateMdApe)}</td>
-                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.estimateP90Ape)}</td>
-                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.estimateP95Ape)}</td>
-                                            <td className="px-2 py-1.5 text-right">{fmtPct(t.recommendationMdApe)}</td>
-                                            <td className="px-2 py-1.5 text-right">{fmtNum(t.historicalDispersionMedian)}</td>
-                                            <td className="px-2 py-1.5 text-right">{t.singleHistoryCount}/{t.multiHistoryCount}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        <p className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>
-                            historical dispersion median은 HIGH/MEDIUM을 여전히 뚜렷하게 구분합니다(정확도 차이보다 훨씬 큼) —
-                            신뢰도는 정확도 등급이 아니라 데이터 근거의 안정성 지표라는 문구가 이 결과와 일치합니다.
-                        </p>
-                    </>
-                )}
-            </div>
-        </details>
-        </MayoCard>
+        <div className="flex flex-col gap-3 text-xs">
+            <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
+                신뢰도는 추정에 사용한 과거 데이터 근거의 안정성 지표입니다. 이 backtest는 production 판정식을 바꾸지 않습니다.
+            </p>
+            {loading && !data && <MayoLoadingSpinner size="sm" color="blue" label="불러오는 중..." />}
+            {error && <MayoAlert type="error">{error}</MayoAlert>}
+            {data && (
+                <>
+                    <p className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>fold: {data.summary.foldYears.join("/")} · Series n={data.summary.seriesN.toLocaleString()}</p>
+                    <MayoTable columns={reliabilityTableColumns} data={data.summary.tiers as unknown as Record<string, unknown>[]} rowKey="tier" striped bordered />
+                </>
+            )}
+        </div>
     );
 }
