@@ -7,12 +7,13 @@ import {
     MayoCard,
     MayoLoadingSpinner,
     MayoAlert,
-    MayoBadge,
+    MayoTag,
     MayoBarChart,
     MayoLineChart,
     MayoTable,
-    MayoTabs,
     MayoDivider,
+    MayoProgress,
+    MayoAccordion,
 } from "mayoui-react";
 
 /** 시도 코드 */
@@ -171,6 +172,17 @@ interface ConcentrationItem {
     cnctrRate: string;
 }
 
+interface VisitorProfile {
+    regionLabel: string;
+    localVisitors: number;
+    outsiderVisitors: number;
+    foreignVisitors: number;
+    totalVisitors: number;
+    outsiderRatio: number;
+    nationalOutsiderRatio: number;
+    outsiderRatioRank: number;
+}
+
 function formatDate(ymd: string) {
     return `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
 }
@@ -188,18 +200,35 @@ function getDayLabel(ymd: string) {
     return days[d.getDay()];
 }
 
+function fmtNum(n: number): string {
+    if (n >= 1e8) return `${(n / 1e8).toFixed(1)}억`;
+    if (n >= 1e4) return `${(n / 1e4).toFixed(0)}만`;
+    return n.toLocaleString();
+}
+
 export default function ConcentrationPage() {
     const [areaCd, setAreaCd] = useState("");
     const [signguCd, setSignguCd] = useState("");
     const [selectedAttraction, setSelectedAttraction] = useState("");
     const [loading, setLoading] = useState(false);
+    const [loadingProgress, setLoadingProgress] = useState(0);
     const [error, setError] = useState<string | null>(null);
     const [allItems, setAllItems] = useState<ConcentrationItem[]>([]);
     const [totalCount, setTotalCount] = useState(0);
 
+    // visitor stats
+    const [visitorProfiles, setVisitorProfiles] = useState<VisitorProfile[]>([]);
+    const [visitorLoading, setVisitorLoading] = useState(false);
+    const [visitorError, setVisitorError] = useState<string | null>(null);
+    const [visitorMonth, setVisitorMonth] = useState(() => {
+        const now = new Date();
+        // default to 2 months ago (data may lag)
+        const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    });
+
     const districts = SIGNGU_CODES[areaCd] ?? [];
 
-    // 시군구 전체 데이터 불러오기
     async function handleSearch() {
         if (!areaCd || !signguCd) {
             setError("시도와 시군구를 선택해주세요.");
@@ -207,8 +236,21 @@ export default function ConcentrationPage() {
         }
         setError(null);
         setLoading(true);
+        setLoadingProgress(0);
         setAllItems([]);
         setSelectedAttraction("");
+
+        // progress animation
+        let frame: number;
+        let start: number | null = null;
+        const tick = (ts: number) => {
+            if (start === null) start = ts;
+            const elapsed = ts - start;
+            const pct = Math.min(90, 90 * (1 - Math.exp(-elapsed / 2000)));
+            setLoadingProgress(Math.round(pct));
+            frame = requestAnimationFrame(tick);
+        };
+        frame = requestAnimationFrame(tick);
 
         try {
             const params = new URLSearchParams({ areaCd, signguCd, numOfRows: "1000" });
@@ -218,13 +260,35 @@ export default function ConcentrationPage() {
 
             setAllItems(data.items);
             setTotalCount(data.totalCount);
+            setLoadingProgress(100);
             if (data.items.length === 0) {
                 setError("해당 지역의 관광지 데이터가 없습니다.");
             }
         } catch (e) {
             setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
         } finally {
+            cancelAnimationFrame(frame);
             setLoading(false);
+        }
+    }
+
+    async function handleVisitorFetch() {
+        const [yearStr, monthStr] = visitorMonth.split("-");
+        const year = Number(yearStr);
+        const month = Number(monthStr);
+        if (!year || !month) return;
+
+        setVisitorLoading(true);
+        setVisitorError(null);
+        try {
+            const res = await fetch(`/api/v1/visitor-stats?year=${year}&month=${month}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message ?? "조회 실패");
+            setVisitorProfiles(data.profiles ?? []);
+        } catch (e) {
+            setVisitorError(e instanceof Error ? e.message : "방문자 데이터 조회 실패");
+        } finally {
+            setVisitorLoading(false);
         }
     }
 
@@ -240,7 +304,7 @@ export default function ConcentrationPage() {
         return allItems.filter((i) => i.tAtsNm === selectedAttraction);
     }, [allItems, selectedAttraction]);
 
-    // 관광지별 평균 집중률 (테이블용 - 전체 관광지)
+    // 관광지별 평균 집중률
     const attractionAvg = useMemo(() => {
         const map = new Map<string, number[]>();
         for (const item of allItems) {
@@ -263,14 +327,14 @@ export default function ConcentrationPage() {
     const dailyAvg = useMemo(() => {
         return items
             .map((item) => ({
-                label: `${item.baseYmd.slice(4, 6)}/${item.baseYmd.slice(6, 8)}`,
+                label: `${item.baseYmd.slice(4, 6)}/${item.baseYmd.slice(6, 8)}(${getDayLabel(item.baseYmd)})`,
                 집중률: Math.round(Number(item.cnctrRate) * 10) / 10,
                 _ymd: item.baseYmd,
             }))
             .sort((a, b) => a._ymd.localeCompare(b._ymd));
     }, [items]);
 
-    // 요약 통계 (선택된 관광지 기준)
+    // 요약 통계
     const summary = useMemo(() => {
         if (items.length === 0) return null;
         const rates = items.map((i) => Number(i.cnctrRate));
@@ -280,6 +344,15 @@ export default function ConcentrationPage() {
         const maxItem = items.find((i) => Number(i.cnctrRate) === max);
         return { avg, max, min, maxItem, attractionCount: attractions.length, days: items.length };
     }, [items, attractions]);
+
+    // 관광지별 바 차트 (평균 집중률 상위 10개)
+    const attractionBarData = useMemo(() => {
+        return attractionAvg.slice(0, 10).map((a) => ({
+            label: a.name.length > 8 ? a.name.slice(0, 7) + "…" : a.name,
+            평균: Math.round(a.avg * 10) / 10,
+            최대: Math.round(a.max * 10) / 10,
+        }));
+    }, [attractionAvg]);
 
     // 테이블 데이터
     const tableData = useMemo(() => {
@@ -293,294 +366,446 @@ export default function ConcentrationPage() {
         }));
     }, [attractionAvg]);
 
+    // visitor chart data
+    const visitorBarData = useMemo(() => {
+        if (!visitorProfiles.length) return [];
+        return [...visitorProfiles]
+            .sort((a, b) => b.totalVisitors - a.totalVisitors)
+            .map((p) => ({
+                label: p.regionLabel,
+                총방문자: Math.round(p.totalVisitors / 1e4),
+                외지인: Math.round(p.outsiderVisitors / 1e4),
+                외국인: Math.round(p.foreignVisitors / 1e4),
+            }));
+    }, [visitorProfiles]);
+
+    const outsiderRatioData = useMemo(() => {
+        if (!visitorProfiles.length) return [];
+        return [...visitorProfiles]
+            .sort((a, b) => b.outsiderRatio - a.outsiderRatio)
+            .map((p) => ({
+                label: p.regionLabel,
+                외지인비율: Math.round(p.outsiderRatio * 1000) / 10,
+            }));
+    }, [visitorProfiles]);
+
     const selectedAreaName = AREA_CODES.find((a) => a.code === areaCd)?.name ?? "";
     const selectedSignguName = districts.find((d) => d.code === signguCd)?.name ?? "";
 
+    // highlight the selected area in visitor data
+    const selectedAreaProfile = useMemo(() => {
+        if (!visitorProfiles.length || !selectedAreaName) return null;
+        return visitorProfiles.find((p) => selectedAreaName.startsWith(p.regionLabel) || p.regionLabel.startsWith(selectedAreaName.slice(0, 2)));
+    }, [visitorProfiles, selectedAreaName]);
+
     return (
-        <main className="min-h-screen py-8 px-4" style={{ background: "var(--mayo-bg-subtle)" }}>
-            <div className="max-w-6xl mx-auto">
-                <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--mayo-text)" }}>
+        <main className="min-h-screen flex flex-col p-4 lg:p-5 gap-4" style={{ background: "var(--mayo-bg-subtle)" }}>
+            {/* 헤더 */}
+            <header>
+                <h1 className="text-xl font-bold" style={{ color: "var(--mayo-text)" }}>
                     관광지 집중률 예측
                 </h1>
-                <p className="text-sm mb-6" style={{ color: "var(--mayo-text-muted)" }}>
+                <p className="text-sm mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
                     한국관광공사 빅데이터 기반 향후 30일간 관광지별 방문자 집중률 예측 분석
                 </p>
-
                 <MayoDivider />
+            </header>
 
-                {/* 검색 폼 */}
-                <MayoCard variant="outlined" padding="md" title="조건 선택">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
-                        <MayoSelect
-                            label="시도"
-                            size="md"
-                            placeholder="시도 선택"
-                            value={areaCd}
-                            onChange={(e) => {
-                                setAreaCd(e.target.value);
-                                setSignguCd("");
-                                setAllItems([]);
-                                setSelectedAttraction("");
-                            }}
-                            options={AREA_CODES.map((a) => ({
-                                value: a.code,
-                                label: a.name,
-                            }))}
-                        />
-                        <MayoSelect
-                            label="시군구"
-                            size="md"
-                            placeholder="시군구 선택"
-                            value={signguCd}
-                            onChange={(e) => {
-                                setSignguCd(e.target.value);
-                                setAllItems([]);
-                                setSelectedAttraction("");
-                            }}
-                            options={districts.map((d) => ({
-                                value: d.code,
-                                label: d.name,
-                            }))}
-                            disabled={!areaCd}
-                        />
-                        <div className="flex items-end">
-                            <MayoBtn
-                                variant="primary"
-                                size="md"
-                                color="blue"
-                                onClick={handleSearch}
-                                disabled={loading || !areaCd || !signguCd}
-                                className="w-full"
-                            >
-                                {loading ? "불러오는 중..." : "관광지 불러오기"}
-                            </MayoBtn>
-                        </div>
-                    </div>
-
-                    {/* 관광지 선택 (데이터 로드 후 표시) */}
-                    {attractions.length > 0 && (
-                        <div className="mt-4">
-                            <MayoSelect
-                                label={`관광지 선택 (${attractions.length}개)`}
-                                size="md"
-                                placeholder="관광지를 선택하세요"
-                                value={selectedAttraction}
-                                onChange={(e) => setSelectedAttraction(e.target.value)}
-                                options={attractions.map((name) => ({
-                                    value: name,
-                                    label: name,
-                                }))}
-                            />
-                        </div>
-                    )}
-                </MayoCard>
-
-                {/* 로딩 */}
-                {loading && (
-                    <div className="flex justify-center py-16">
-                        <MayoLoadingSpinner size="lg" color="blue" label="데이터를 불러오는 중..." />
-                    </div>
+            {/* 검색 폼 — 한 줄 그리드 */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end" style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", borderRadius: 8, padding: "12px 16px" }}>
+                <MayoSelect
+                    label="시도"
+                    size="sm"
+                    placeholder="시도 선택"
+                    value={areaCd}
+                    onChange={(e) => {
+                        setAreaCd(e.target.value);
+                        setSignguCd("");
+                        setAllItems([]);
+                        setSelectedAttraction("");
+                    }}
+                    options={AREA_CODES.map((a) => ({ value: a.code, label: a.name }))}
+                />
+                <MayoSelect
+                    label="시군구"
+                    size="sm"
+                    placeholder="시군구 선택"
+                    value={signguCd}
+                    onChange={(e) => {
+                        setSignguCd(e.target.value);
+                        setAllItems([]);
+                        setSelectedAttraction("");
+                    }}
+                    options={districts.map((d) => ({ value: d.code, label: d.name }))}
+                    disabled={!areaCd}
+                />
+                {attractions.length > 0 ? (
+                    <MayoSelect
+                        label={`관광지 (${attractions.length}개)`}
+                        size="sm"
+                        placeholder="관광지를 선택하세요"
+                        value={selectedAttraction}
+                        onChange={(e) => setSelectedAttraction(e.target.value)}
+                        options={attractions.map((name) => ({ value: name, label: name }))}
+                    />
+                ) : (
+                    <div />
                 )}
-
-                {/* 에러 */}
-                {error && (
-                    <div className="mt-4">
-                        <MayoAlert type="error" title="오류">{error}</MayoAlert>
-                    </div>
-                )}
-
-                {/* 결과 */}
-                {!loading && selectedAttraction && items.length > 0 && summary && (
-                    <div className="mt-6 space-y-6">
-                        {/* 요약 카드 */}
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>관광지</p>
-                                <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
-                                    {selectedAttraction}
-                                </p>
-                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>
-                                    {selectedAreaName} {selectedSignguName}
-                                </p>
-                            </MayoCard>
-                            <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>예측 기간</p>
-                                <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
-                                    {summary.days}일
-                                </p>
-                            </MayoCard>
-                            <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>평균 집중률</p>
-                                <div className="flex items-center gap-2">
-                                    <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
-                                        {summary.avg.toFixed(1)}%
-                                    </p>
-                                    <MayoBadge
-                                        color={getRateLevel(summary.avg).color}
-                                        variant="soft"
-                                        size="sm"
-                                    >
-                                        {getRateLevel(summary.avg).label}
-                                    </MayoBadge>
-                                </div>
-                            </MayoCard>
-                            <MayoCard variant="outlined" padding="sm">
-                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>최고 집중률</p>
-                                <div className="flex items-center gap-2">
-                                    <p className="text-lg font-bold" style={{ color: "var(--mayo-text)" }}>
-                                        {summary.max.toFixed(1)}%
-                                    </p>
-                                    <MayoBadge
-                                        color={getRateLevel(summary.max).color}
-                                        variant="soft"
-                                        size="sm"
-                                    >
-                                        {getRateLevel(summary.max).label}
-                                    </MayoBadge>
-                                </div>
-                                {summary.maxItem && (
-                                    <p className="text-xs mt-1" style={{ color: "var(--mayo-text-muted)" }}>
-                                        {formatDate(summary.maxItem.baseYmd)}
-                                    </p>
-                                )}
-                            </MayoCard>
-                        </div>
-
-                        {/* 탭: 차트 / 테이블 */}
-                        <MayoTabs
-                            variant="line"
-                            color="blue"
-                            defaultValue="chart"
-                            tabs={[
-                                {
-                                    value: "chart",
-                                    label: "일별 추이",
-                                    children: (
-                                        <div className="pt-2">
-                                            <MayoCard variant="outlined" padding="md">
-                                                <MayoLineChart
-                                                    title={`${selectedAttraction} 일별 집중률 추이`}
-                                                    data={dailyAvg}
-                                                    series={[
-                                                        { key: "집중률", color: "#2e8af2", label: "집중률" },
-                                                    ]}
-                                                    height={300}
-                                                    showGrid
-                                                    showLegend
-                                                    showDots
-                                                />
-                                            </MayoCard>
-                                        </div>
-                                    ),
-                                },
-                                {
-                                    value: "table",
-                                    label: "테이블",
-                                    children: (
-                                        <div className="pt-2">
-                                            <MayoCard variant="outlined" padding="md">
-                                                <MayoTable
-                                                    columns={[
-                                                        { key: "rank", label: "순위", width: 60, sortable: true },
-                                                        { key: "name", label: "관광지명", sortable: true },
-                                                        {
-                                                            key: "avg",
-                                                            label: "평균 집중률(%)",
-                                                            width: 140,
-                                                            sortable: true,
-                                                            render: (val: string | number) => {
-                                                                const num = typeof val === "string" ? parseFloat(val) : val;
-                                                                return (
-                                                                <div className="flex items-center gap-2">
-                                                                    <span>{num}</span>
-                                                                    <MayoBadge
-                                                                        color={getRateLevel(num).color}
-                                                                        variant="soft"
-                                                                        size="sm"
-                                                                    >
-                                                                        {getRateLevel(num).label}
-                                                                    </MayoBadge>
-                                                                </div>
-                                                            );},
-                                                        },
-                                                        { key: "max", label: "최대(%)", width: 100, sortable: true },
-                                                        { key: "min", label: "최소(%)", width: 100, sortable: true },
-                                                        { key: "days", label: "예측일수", width: 90, sortable: true },
-                                                    ]}
-                                                    data={tableData}
-                                                    rowKey="name"
-                                                    striped
-                                                    bordered
-                                                    emptyText="데이터가 없습니다."
-                                                />
-                                            </MayoCard>
-                                        </div>
-                                    ),
-                                },
-                                {
-                                    value: "raw",
-                                    label: "원시 데이터",
-                                    children: (
-                                        <div className="pt-2">
-                                            <MayoCard variant="outlined" padding="md">
-                                                <MayoTable
-                                                    columns={[
-                                                        { key: "baseYmd", label: "날짜", width: 120, sortable: true, render: (v: string) => `${formatDate(v)} (${getDayLabel(v)})` },
-                                                        { key: "areaNm", label: "시도", width: 120 },
-                                                        { key: "signguNm", label: "시군구", width: 120 },
-                                                        { key: "tAtsNm", label: "관광지명", sortable: true },
-                                                        {
-                                                            key: "cnctrRate",
-                                                            label: "집중률(%)",
-                                                            width: 140,
-                                                            sortable: true,
-                                                            render: (val: string) => {
-                                                                const n = Number(val);
-                                                                return (
-                                                                    <div className="flex items-center gap-2">
-                                                                        <span className="font-semibold">{n.toFixed(1)}</span>
-                                                                        <MayoBadge
-                                                                            color={getRateLevel(n).color}
-                                                                            variant="soft"
-                                                                            size="sm"
-                                                                        >
-                                                                            {getRateLevel(n).label}
-                                                                        </MayoBadge>
-                                                                    </div>
-                                                                );
-                                                            },
-                                                        },
-                                                    ]}
-                                                    data={items.slice(0, 200)}
-                                                    rowKey="baseYmd"
-                                                    striped
-                                                    bordered
-                                                    emptyText="데이터가 없습니다."
-                                                />
-                                                {items.length > 200 && (
-                                                    <p className="text-xs mt-2 text-center" style={{ color: "var(--mayo-text-muted)" }}>
-                                                        상위 200건만 표시 (전체 {items.length}건)
-                                                    </p>
-                                                )}
-                                            </MayoCard>
-                                        </div>
-                                    ),
-                                },
-                            ]}
-                        />
-                    </div>
-                )}
-
-                {/* 검색 전 안내 */}
-                {!loading && items.length === 0 && !error && (
-                    <div className="mt-8">
-                        <MayoAlert type="info" title="사용 방법">
-                            시도와 시군구를 선택한 뒤 &quot;관광지 불러오기&quot; 버튼을 눌러주세요.
-                            관광지 목록에서 원하는 관광지를 선택하면 집중률 분석 결과를 확인할 수 있습니다.
-                        </MayoAlert>
-                    </div>
-                )}
+                <MayoBtn
+                    variant="primary"
+                    size="sm"
+                    color="blue"
+                    onClick={handleSearch}
+                    disabled={loading || !areaCd || !signguCd}
+                    className="w-full"
+                >
+                    {loading ? "불러오는 중..." : "관광지 불러오기"}
+                </MayoBtn>
             </div>
+
+            {/* 로딩 프로그레스 */}
+            {loading && (
+                <MayoProgress value={loadingProgress} max={100} size="sm" color="blue" label="데이터 로드 중" showValue />
+            )}
+
+            {/* 에러 */}
+            {error && <MayoAlert type="error" title="오류">{error}</MayoAlert>}
+
+            {/* 검색 결과 태그 */}
+            {!loading && allItems.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                    <MayoTag color="blue" variant="solid" size="sm">{selectedAreaName} {selectedSignguName}</MayoTag>
+                    <MayoTag color="gray" variant="soft" size="sm">관광지 {attractions.length}개</MayoTag>
+                    <MayoTag color="gray" variant="soft" size="sm">총 {totalCount}건</MayoTag>
+                    {selectedAttraction && (
+                        <MayoTag color="green" variant="solid" size="sm">{selectedAttraction}</MayoTag>
+                    )}
+                </div>
+            )}
+
+            {/* ───── 집중률 분석 결과 (관광지 선택 시) ───── */}
+            {!loading && selectedAttraction && items.length > 0 && summary && (
+                <>
+                    {/* 요약 메트릭 카드 */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <MetricBox label="관광지" value={selectedAttraction} sub={`${selectedAreaName} ${selectedSignguName}`} />
+                        <MetricBox label="예측 기간" value={`${summary.days}일`} />
+                        <MetricBox
+                            label="평균 집중률"
+                            value={`${summary.avg.toFixed(1)}%`}
+                            tag={getRateLevel(summary.avg)}
+                        />
+                        <MetricBox
+                            label="최고 집중률"
+                            value={`${summary.max.toFixed(1)}%`}
+                            tag={getRateLevel(summary.max)}
+                            sub={summary.maxItem ? formatDate(summary.maxItem.baseYmd) : undefined}
+                        />
+                    </div>
+
+                    {/* 차트 + 테이블 — 세로 배치 */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        {/* 일별 추이 라인 차트 */}
+                        <MayoCard variant="outlined" padding="md">
+                            <MayoLineChart
+                                title={`${selectedAttraction} 일별 집중률 추이`}
+                                data={dailyAvg}
+                                series={[{ key: "집중률", color: "#2e8af2", label: "집중률(%)" }]}
+                                height={280}
+                                showGrid
+                                showLegend
+                                showDots
+                            />
+                        </MayoCard>
+
+                        {/* 관광지별 평균 집중률 바 차트 (상위 10개) */}
+                        {attractionBarData.length > 0 && (
+                            <MayoCard variant="outlined" padding="md">
+                                <MayoBarChart
+                                    title="관광지별 집중률 비교 (상위 10)"
+                                    data={attractionBarData}
+                                    series={[
+                                        { key: "평균", color: "#2e8af2", label: "평균(%)" },
+                                        { key: "최대", color: "#f97316", label: "최대(%)" },
+                                    ]}
+                                    height={280}
+                                    showGrid
+                                    showLegend
+                                />
+                            </MayoCard>
+                        )}
+                    </div>
+
+                    {/* 전체 관광지 테이블 */}
+                    <MayoCard variant="outlined" padding="md">
+                        <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
+                            전체 관광지 집중률 순위
+                        </p>
+                        <MayoTable
+                            columns={[
+                                { key: "rank", label: "순위", width: 60, sortable: true },
+                                { key: "name", label: "관광지명", sortable: true },
+                                {
+                                    key: "avg",
+                                    label: "평균 집중률(%)",
+                                    width: 150,
+                                    sortable: true,
+                                    render: (val: unknown) => {
+                                        const num = typeof val === "string" ? parseFloat(val) : Number(val);
+                                        const lvl = getRateLevel(num);
+                                        return (
+                                            <div className="flex items-center gap-2">
+                                                <span>{num}</span>
+                                                <MayoTag color={lvl.color} variant="soft" size="sm">{lvl.label}</MayoTag>
+                                            </div>
+                                        );
+                                    },
+                                },
+                                { key: "max", label: "최대(%)", width: 100, sortable: true },
+                                { key: "min", label: "최소(%)", width: 100, sortable: true },
+                                { key: "days", label: "예측일수", width: 90, sortable: true },
+                            ]}
+                            data={tableData as unknown as Record<string, unknown>[]}
+                            rowKey="name"
+                            striped
+                            bordered
+                            emptyText="데이터가 없습니다."
+                        />
+                    </MayoCard>
+
+                    {/* 원시 데이터 (접을 수 있도록 아코디언) */}
+                    <MayoAccordion
+                        multiple
+                        bordered
+                        items={[
+                            {
+                                value: "raw",
+                                label: `원시 데이터 (${items.length}건)`,
+                                children: (
+                                    <MayoTable
+                                        columns={[
+                                            { key: "baseYmd", label: "날짜", width: 130, sortable: true, render: (v: unknown) => `${formatDate(String(v))} (${getDayLabel(String(v))})` },
+                                            { key: "areaNm", label: "시도", width: 110 },
+                                            { key: "signguNm", label: "시군구", width: 110 },
+                                            { key: "tAtsNm", label: "관광지명", sortable: true },
+                                            {
+                                                key: "cnctrRate",
+                                                label: "집중률(%)",
+                                                width: 140,
+                                                sortable: true,
+                                                render: (val: unknown) => {
+                                                    const n = Number(val);
+                                                    const lvl = getRateLevel(n);
+                                                    return (
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-semibold">{n.toFixed(1)}</span>
+                                                            <MayoTag color={lvl.color} variant="soft" size="sm">{lvl.label}</MayoTag>
+                                                        </div>
+                                                    );
+                                                },
+                                            },
+                                        ]}
+                                        data={items.slice(0, 200) as unknown as Record<string, unknown>[]}
+                                        rowKey="baseYmd"
+                                        striped
+                                        bordered
+                                        emptyText="데이터가 없습니다."
+                                    />
+                                ),
+                            },
+                        ]}
+                    />
+                </>
+            )}
+
+            {/* ───── 지역별 관광 수요 강도 ───── */}
+            <MayoDivider />
+            <section>
+                <h2 className="text-lg font-bold mb-1" style={{ color: "var(--mayo-text)" }}>
+                    지역별 관광 수요 강도
+                </h2>
+                <p className="text-xs mb-3" style={{ color: "var(--mayo-text-muted)" }}>
+                    이동통신 기반 광역시도별 방문자 수 및 외지인 비율 비교
+                </p>
+
+                <div className="flex items-end gap-3 mb-4" style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", borderRadius: 8, padding: "10px 14px" }}>
+                    <div className="flex-1 max-w-xs">
+                        <label className="text-xs font-medium block mb-1" style={{ color: "var(--mayo-text-muted)" }}>조회 월</label>
+                        <input
+                            type="month"
+                            value={visitorMonth}
+                            onChange={(e) => setVisitorMonth(e.target.value)}
+                            className="w-full rounded border px-2 py-1 text-sm"
+                            style={{ background: "var(--mayo-bg)", color: "var(--mayo-text)", borderColor: "var(--mayo-border)" }}
+                        />
+                    </div>
+                    <MayoBtn
+                        variant="primary"
+                        size="sm"
+                        color="green"
+                        onClick={handleVisitorFetch}
+                        disabled={visitorLoading}
+                    >
+                        {visitorLoading ? "불러오는 중..." : "방문자 데이터 조회"}
+                    </MayoBtn>
+                </div>
+
+                {visitorLoading && (
+                    <div className="flex justify-center py-8">
+                        <MayoLoadingSpinner size="md" color="green" label="방문자 데이터를 불러오는 중..." />
+                    </div>
+                )}
+
+                {visitorError && <MayoAlert type="error" title="방문자 데이터 오류">{visitorError}</MayoAlert>}
+
+                {!visitorLoading && visitorProfiles.length > 0 && (
+                    <>
+                        {/* 선택 지역 하이라이트 */}
+                        {selectedAreaProfile && (
+                            <div className="flex items-center gap-2 flex-wrap mb-3">
+                                <MayoTag color="green" variant="solid" size="sm">{selectedAreaProfile.regionLabel}</MayoTag>
+                                <MayoTag color="blue" variant="soft" size="sm">
+                                    총 방문자 {fmtNum(selectedAreaProfile.totalVisitors)}명
+                                </MayoTag>
+                                <MayoTag color="purple" variant="soft" size="sm">
+                                    외지인 비율 {(selectedAreaProfile.outsiderRatio * 100).toFixed(1)}%
+                                </MayoTag>
+                                <MayoTag color="gray" variant="soft" size="sm">
+                                    전국 {selectedAreaProfile.outsiderRatioRank}위 / 17개 시도
+                                </MayoTag>
+                            </div>
+                        )}
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            {/* 총 방문자 수 비교 */}
+                            <MayoCard variant="outlined" padding="md">
+                                <MayoBarChart
+                                    title="시도별 방문자 수 (만명)"
+                                    data={visitorBarData}
+                                    series={[
+                                        { key: "외지인", color: "#8b5cf6", label: "외지인(만)" },
+                                        { key: "외국인", color: "#f97316", label: "외국인(만)" },
+                                        { key: "총방문자", color: "#2e8af2", label: "총방문자(만)" },
+                                    ]}
+                                    height={340}
+                                    showGrid
+                                    showLegend
+                                />
+                            </MayoCard>
+
+                            {/* 외지인 비율 비교 */}
+                            <MayoCard variant="outlined" padding="md">
+                                <MayoBarChart
+                                    title="시도별 외지인 비율 (%)"
+                                    data={outsiderRatioData}
+                                    series={[
+                                        { key: "외지인비율", color: "#10b981", label: "외지인 비율(%)" },
+                                    ]}
+                                    height={340}
+                                    showGrid
+                                    showLegend
+                                />
+                            </MayoCard>
+                        </div>
+
+                        {/* 방문자 상세 테이블 */}
+                        <MayoCard variant="outlined" padding="md" className="mt-4">
+                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
+                                시도별 방문자 상세
+                            </p>
+                            <MayoTable
+                                columns={[
+                                    { key: "regionLabel", label: "시도", sortable: true },
+                                    {
+                                        key: "totalVisitors",
+                                        label: "총 방문자",
+                                        sortable: true,
+                                        render: (v: unknown) => fmtNum(Number(v)),
+                                    },
+                                    {
+                                        key: "localVisitors",
+                                        label: "현지인",
+                                        sortable: true,
+                                        render: (v: unknown) => fmtNum(Number(v)),
+                                    },
+                                    {
+                                        key: "outsiderVisitors",
+                                        label: "외지인",
+                                        sortable: true,
+                                        render: (v: unknown) => fmtNum(Number(v)),
+                                    },
+                                    {
+                                        key: "foreignVisitors",
+                                        label: "외국인",
+                                        sortable: true,
+                                        render: (v: unknown) => fmtNum(Number(v)),
+                                    },
+                                    {
+                                        key: "outsiderRatio",
+                                        label: "외지인 비율",
+                                        width: 130,
+                                        sortable: true,
+                                        render: (v: unknown) => {
+                                            const n = Number(v);
+                                            const pct = (n * 100).toFixed(1);
+                                            const color = n > 0.5 ? "purple" : n > 0.3 ? "blue" : "gray";
+                                            return (
+                                                <div className="flex items-center gap-1">
+                                                    <span>{pct}%</span>
+                                                    <MayoTag color={color as "purple" | "blue" | "gray"} variant="soft" size="sm">
+                                                        {n > 0.5 ? "높음" : n > 0.3 ? "보통" : "낮음"}
+                                                    </MayoTag>
+                                                </div>
+                                            );
+                                        },
+                                    },
+                                    {
+                                        key: "outsiderRatioRank",
+                                        label: "순위",
+                                        width: 70,
+                                        sortable: true,
+                                    },
+                                ]}
+                                data={
+                                    [...visitorProfiles]
+                                        .sort((a, b) => a.outsiderRatioRank - b.outsiderRatioRank) as unknown as Record<string, unknown>[]
+                                }
+                                rowKey="regionLabel"
+                                striped
+                                bordered
+                            />
+                        </MayoCard>
+                    </>
+                )}
+            </section>
+
+            {/* 검색 전 안내 */}
+            {!loading && allItems.length === 0 && !error && (
+                <MayoAlert type="info" title="사용 방법">
+                    시도와 시군구를 선택한 뒤 &quot;관광지 불러오기&quot; 버튼을 눌러주세요.
+                    관광지 목록에서 원하는 관광지를 선택하면 집중률 분석 결과를 확인할 수 있습니다.
+                    하단의 &quot;방문자 데이터 조회&quot;를 통해 지역별 관광 수요도 함께 비교할 수 있습니다.
+                </MayoAlert>
+            )}
         </main>
+    );
+}
+
+/** 메트릭 카드 */
+function MetricBox({ label, value, sub, tag }: {
+    label: string;
+    value: string;
+    sub?: string;
+    tag?: { label: string; color: "green" | "blue" | "purple" | "red" };
+}) {
+    return (
+        <div style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", borderRadius: 8, padding: "10px 14px" }}>
+            <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>{label}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+                <p className="text-lg font-bold truncate" style={{ color: "var(--mayo-text)" }}>{value}</p>
+                {tag && <MayoTag color={tag.color} variant="soft" size="sm">{tag.label}</MayoTag>}
+            </div>
+            {sub && <p className="text-xs mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>{sub}</p>}
+        </div>
     );
 }
