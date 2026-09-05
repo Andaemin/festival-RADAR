@@ -48,6 +48,11 @@ function num(value: number | null, suffix = ""): string {
     return value === null ? "미상" : `${value.toLocaleString("ko-KR")}${suffix}`;
 }
 
+/** 해당 연월의 일수. Date의 day=0은 전월 말일을 뜻한다. */
+function daysInMonth(year: number, month: number): number {
+    return new Date(year, month, 0).getDate();
+}
+
 /** "2026-04-01" + "2026-04-08" -> "2026.04.01~04.08". 해가 넘어가면 종료일도 연도를 붙인다. */
 function period(start: string | null, end: string | null): string | null {
     if (!start) return null;
@@ -504,8 +509,14 @@ export default function PlannerPage() {
                                         },
                                         { label: "17개 시도 중", value: `${visitorProfile.outsiderRatioRank}위` },
                                         {
-                                            label: "월 총 방문",
-                                            value: `${Math.round(visitorProfile.totalVisitors / 10000).toLocaleString("ko-KR")}만명`,
+                                            // 원본 API는 **일자별** 방문자 수이고 현지인이 매일 다시 잡힌다.
+                                            // 한 달치를 그대로 더하면 순방문자가 아니라 인·일(person-days)이라
+                                            // 서울 기준 2억 가까운 수가 나온다(시 인구는 940만). 같은 값을
+                                            // 일수로 나눠 일평균으로 보여준다 - 정의가 원본과 맞고 읽기도 쉽다.
+                                            label: "일평균 방문",
+                                            value: `${Math.round(
+                                                visitorProfile.totalVisitors / daysInMonth(visitorProfile.year, visitorProfile.month) / 10000
+                                            ).toLocaleString("ko-KR")}만명`,
                                         },
                                     ].map((s) => (
                                         <div key={s.label}>
