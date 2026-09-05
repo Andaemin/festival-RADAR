@@ -408,8 +408,8 @@ export default function BudgetEstimatorPage() {
             {/* ── 헤더 ── */}
             <header className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-lg font-bold">💰 예산 추정</h1>
-                    <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>2017~2026 공개 축제 계획 데이터 기반 다년도 계획예산 추정</p>
+                    <h1 className="text-2xl font-bold" style={{ color: "var(--mayo-text)" }}>💰 예산 추정</h1>
+                    <p className="text-sm mt-1" style={{ color: "var(--mayo-text-muted)" }}>2017~2026 공개 축제 계획 데이터 기반 다년도 계획예산 추정</p>
                 </div>
                 <div className="flex items-center gap-2">
                     {result && <MayoTag color="green" variant="soft" size="sm">{result.estimateBasis === "SERIES_HISTORY_MEDIAN" ? "SERIES" : "PEER"}</MayoTag>}
@@ -419,12 +419,13 @@ export default function BudgetEstimatorPage() {
 
             {metaError && <MayoAlert type="error">메타데이터 오류: {metaError}</MayoAlert>}
 
-            {/* ── 입력 폼 — 위쪽, 가로 배치 ── */}
-            <form onSubmit={handleSubmit}>
-            <MayoCard variant="outlined" padding="md">
-                <div className="flex flex-col gap-3">
-                    {/* Row 1: 계획연도 + 축제구분 + 축제 검색/이름 */}
-                    <div className="grid grid-cols-1 md:grid-cols-[120px_1fr_1fr] gap-3 items-start">
+            {/* ── 입력 폼 ── */}
+            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+
+                {/* Step 1: 기본 설정 */}
+                <MayoCard variant="outlined" padding="md">
+                    <p className="text-xs font-semibold mb-3" style={{ color: "var(--mayo-text-muted)" }}>STEP 1 — 기본 설정</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <MayoSelect
                             label="계획연도"
                             size="sm"
@@ -435,66 +436,106 @@ export default function BudgetEstimatorPage() {
                                 return { value: String(y), label: `${y}년` };
                             })}
                         />
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-medium">축제 구분</label>
-                            <div className="flex gap-1.5" role="radiogroup" aria-label="축제 구분">
-                                <MayoBtn type="button" onClick={() => handleFestivalModeChange("EXISTING")} variant={festivalMode === "EXISTING" ? "primary" : "secondary"} color="green" size="xs" style={{ flex: 1 }}>기존 축제</MayoBtn>
-                                <MayoBtn type="button" onClick={() => handleFestivalModeChange("NEW")} variant={festivalMode === "NEW" ? "primary" : "secondary"} color="green" size="xs" style={{ flex: 1 }}>신규 축제</MayoBtn>
-                            </div>
-                        </div>
-                        <div className="relative">
-                            {festivalMode === "EXISTING" ? (
-                                <>
-                                    <MayoInput
-                                        label="축제명 검색"
-                                        type="text"
-                                        size="sm"
-                                        placeholder="2자 이상 입력 시 과거 데이터 검색"
-                                        value={seriesSearchText}
-                                        onChange={(e) => handleSeriesSearchTextChange(e.target.value)}
-                                        onFocus={() => { if (seriesSearchResults.length > 0) setSeriesSearchOpen(true); }}
-                                        onBlur={() => setSeriesSearchOpen(false)}
-                                    />
-                                    {seriesSearchOpen && (
-                                        <div className="absolute left-0 right-0 top-full mt-1 z-10 rounded-lg max-h-60 overflow-y-auto text-sm" style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", boxShadow: "var(--mayo-shadow-md)" }} onMouseDown={(e) => e.preventDefault()}>
-                                            {seriesSearchLoading && <div className="px-3 py-2"><MayoLoadingSpinner size="sm" color="blue" label="검색 중..." /></div>}
-                                            {!seriesSearchLoading && seriesSearchResults.length === 0 && <div className="px-3 py-2 text-xs" style={{ color: "var(--mayo-text-muted)" }}>결과 없음 — 신규 축제를 선택해주세요.</div>}
-                                            {!seriesSearchLoading && seriesSearchResults.map((r) => (
-                                                <button key={buildSeriesSearchResultKey(r)} type="button" onClick={() => handleSelectSeries(r)} className="w-full text-left px-3 py-1.5 hover:opacity-80" style={{ borderBottom: "1px solid var(--mayo-border)" }}>
-                                                    <span className="font-medium text-sm">{r.canonicalName}</span>
-                                                    <span className="text-[10px] ml-2" style={{ color: "var(--mayo-text-muted)" }}>
-                                                        {r.regionCode ? REGION_DISPLAY[r.regionCode] : ""} · {r.firstObservedYear}~{r.lastObservedYear} ({r.historyCount}회)
-                                                    </span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <MayoInput label="축제명 (선택)" type="text" size="sm" placeholder="신규 축제 이름" value={festivalName} onChange={(e) => handleNewFestivalNameChange(e.target.value)} />
-                            )}
-                        </div>
+                        <MayoSelect
+                            label="축제 구분"
+                            size="sm"
+                            value={festivalMode}
+                            onChange={(e) => handleFestivalModeChange(e.target.value as FestivalMode)}
+                            options={[
+                                { value: "EXISTING", label: "기존 축제 (과거 데이터 검색)" },
+                                { value: "NEW", label: "신규 축제" },
+                            ]}
+                        />
+                        {festivalMode === "NEW" && (
+                            <MayoInput label="축제명 (선택)" type="text" size="sm" placeholder="신규 축제 이름" value={festivalName} onChange={(e) => handleNewFestivalNameChange(e.target.value)} />
+                        )}
                     </div>
+                </MayoCard>
 
-                    {/* Series 선택 결과 — 깔끔한 태그 표시 */}
-                    {selectedSeries && (
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <MayoTag color="green" variant="solid" size="sm">{selectedSeries.canonicalName}</MayoTag>
-                            <span className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>이력 {selectedSeries.historyCount}회 · {selectedSeries.firstObservedYear}~{selectedSeries.lastObservedYear}</span>
-                            {selectedSeries.fieldStatus.region === "STABLE" && <MayoTag color="blue" variant="soft" size="sm">{REGION_DISPLAY[selectedSeries.autoFill.regionCode!]}</MayoTag>}
-                            {selectedSeries.fieldStatus.festivalTypes === "STABLE" && selectedSeries.autoFill.festivalTypes.map((t) => (
-                                <MayoTag key={t} color="purple" variant="soft" size="sm">{FESTIVAL_TYPE_DISPLAY[t]}</MayoTag>
-                            ))}
-                            {selectedSeries.fieldStatus.venueType === "STABLE" && <MayoTag color="orange" variant="soft" size="sm">{VENUE_TYPE_DISPLAY[selectedSeries.autoFill.venueType!]}</MayoTag>}
-                            {selectedSeries.fieldStatus.district === "STABLE" && <MayoTag color="gray" variant="soft" size="sm">{selectedSeries.autoFill.district}</MayoTag>}
-                        </div>
-                    )}
-                    {metadataResetNotice && !selectedSeries && (
-                        <MayoAlert type="warning">검색어 변경으로 이전 선택이 초기화되었습니다. 목록에서 다시 선택해주세요.</MayoAlert>
-                    )}
+                {/* Step 2: 축제 검색 (기존 축제만) */}
+                {festivalMode === "EXISTING" && (
+                    <MayoCard variant="outlined" padding="md">
+                        <p className="text-xs font-semibold mb-3" style={{ color: "var(--mayo-text-muted)" }}>STEP 2 — 축제 검색</p>
 
-                    {/* Row 2: 지역/시군구/축제유형/장소유형/개최일수 + 계산 버튼 */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-start">
+                        {/* 선택된 시리즈 하이라이트 */}
+                        {selectedSeries && (
+                            <div className="mb-3 rounded-lg p-3" style={{ background: "var(--mayo-bg-subtle)", border: "1px solid var(--mayo-primary, #10b981)" }}>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <span className="text-sm font-bold" style={{ color: "var(--mayo-text)" }}>{selectedSeries.canonicalName}</span>
+                                    <MayoTag color="green" variant="solid" size="sm">선택됨</MayoTag>
+                                </div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <MayoTag color="gray" variant="soft" size="sm">이력 {selectedSeries.historyCount}회 · {selectedSeries.firstObservedYear}~{selectedSeries.lastObservedYear}</MayoTag>
+                                    {selectedSeries.fieldStatus.region === "STABLE" && <MayoTag color="blue" variant="soft" size="sm">{REGION_DISPLAY[selectedSeries.autoFill.regionCode!]}</MayoTag>}
+                                    {selectedSeries.fieldStatus.festivalTypes === "STABLE" && selectedSeries.autoFill.festivalTypes.map((t) => (
+                                        <MayoTag key={t} color="purple" variant="soft" size="sm">{FESTIVAL_TYPE_DISPLAY[t]}</MayoTag>
+                                    ))}
+                                    {selectedSeries.fieldStatus.venueType === "STABLE" && <MayoTag color="orange" variant="soft" size="sm">{VENUE_TYPE_DISPLAY[selectedSeries.autoFill.venueType!]}</MayoTag>}
+                                    {selectedSeries.fieldStatus.district === "STABLE" && <MayoTag color="gray" variant="soft" size="sm">{selectedSeries.autoFill.district}</MayoTag>}
+                                </div>
+                            </div>
+                        )}
+
+                        {metadataResetNotice && !selectedSeries && (
+                            <div className="mb-3">
+                                <MayoAlert type="warning">검색어 변경으로 이전 선택이 초기화되었습니다. 목록에서 다시 선택해주세요.</MayoAlert>
+                            </div>
+                        )}
+
+                        <MayoInput
+                            label="축제명 검색"
+                            type="text"
+                            size="sm"
+                            placeholder="2자 이상 입력하면 과거 데이터에서 검색합니다"
+                            value={seriesSearchText}
+                            onChange={(e) => handleSeriesSearchTextChange(e.target.value)}
+                        />
+
+                        {/* 검색 로딩 */}
+                        {seriesSearchLoading && (
+                            <div className="mt-2">
+                                <MayoProgress value={70} max={100} size="sm" color="blue" label="축제 데이터 검색 중" />
+                            </div>
+                        )}
+
+                        {/* 검색 결과 리스트 (인라인) */}
+                        {!seriesSearchLoading && seriesSearchResults.length > 0 && (
+                            <div className="mt-3 flex flex-col gap-1.5">
+                                <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>검색 결과 {seriesSearchResults.length}건</p>
+                                {seriesSearchResults.map((r) => (
+                                    <button
+                                        key={buildSeriesSearchResultKey(r)}
+                                        type="button"
+                                        onClick={() => handleSelectSeries(r)}
+                                        className="w-full text-left rounded-lg p-3 transition-opacity hover:opacity-80"
+                                        style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)" }}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <span className="font-semibold text-sm" style={{ color: "var(--mayo-text)" }}>{r.canonicalName}</span>
+                                            <div className="flex items-center gap-1.5">
+                                                {r.regionCode && <MayoTag color="blue" variant="soft" size="sm">{REGION_DISPLAY[r.regionCode]}</MayoTag>}
+                                                <MayoTag color="gray" variant="soft" size="sm">{r.historyCount}회</MayoTag>
+                                            </div>
+                                        </div>
+                                        <p className="text-xs mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
+                                            {r.firstObservedYear}~{r.lastObservedYear}년 개최
+                                        </p>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                        {!seriesSearchLoading && seriesSearchText.trim().length >= SEARCH_MIN_LENGTH && seriesSearchResults.length === 0 && !selectedSeries && (
+                            <p className="mt-2 text-xs" style={{ color: "var(--mayo-text-muted)" }}>검색 결과 없음 — 축제 구분을 &quot;신규 축제&quot;로 변경해주세요.</p>
+                        )}
+                    </MayoCard>
+                )}
+
+                {/* Step 3: 세부 조건 */}
+                <MayoCard variant="outlined" padding="md">
+                    <p className="text-xs font-semibold mb-3" style={{ color: "var(--mayo-text-muted)" }}>
+                        {festivalMode === "EXISTING" ? "STEP 3" : "STEP 2"} — 세부 조건
+                    </p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-start">
                         <MayoSelect
                             label={regionAutoFilled ? "광역자치단체 ✓" : "광역자치단체"}
                             size="sm"
@@ -513,16 +554,6 @@ export default function BudgetEstimatorPage() {
                             disabled={districts.length === 0}
                             options={districts.map((d) => ({ value: d, label: d }))}
                         />
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-medium">
-                                축제 유형 {festivalTypesAutoFilled && <span style={{ color: "var(--mayo-primary, #10b981)" }}>✓</span>}
-                            </label>
-                            <div className="flex flex-wrap gap-1.5">
-                                {metadata?.festivalTypes.map((t) => (
-                                    <MayoToggle key={t.code} checked={festivalTypes.includes(t.code)} onChange={() => toggleFestivalType(t.code)} label={t.displayName} size="sm" color="blue" />
-                                ))}
-                            </div>
-                        </div>
                         <MayoSelect
                             label={venueAutoFilled ? "장소 유형 ✓" : "장소 유형"}
                             size="sm"
@@ -532,22 +563,34 @@ export default function BudgetEstimatorPage() {
                             disabled={!metadata}
                             options={metadata?.venueTypes.map((v) => ({ value: v.code, label: v.displayName })) ?? []}
                         />
-                        <MayoInput label="개최 일수" type="number" size="sm" min={2} max={180} placeholder="예: 3" value={durationDays} onChange={(e) => setDurationDays(e.target.value === "" ? "" : Number(e.target.value))} />
-                        <div className="flex flex-col gap-1">
-                            <label className="text-xs font-medium">&nbsp;</label>
-                            <MayoBtn type="submit" disabled={loading || !metadata || !canSubmit} variant="primary" color="green" size="sm" style={{ width: "100%" }}>
-                                {loading ? `계산 중 ${loadingProgress}%` : "계획예산 계산"}
-                            </MayoBtn>
-                        </div>
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 items-start">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-xs font-medium" style={{ color: "var(--mayo-text)" }}>
+                                축제 유형 {festivalTypesAutoFilled && <span style={{ color: "var(--mayo-primary, #10b981)" }}>✓</span>}
+                            </label>
+                            <div className="flex flex-wrap gap-1.5">
+                                {metadata?.festivalTypes.map((t) => (
+                                    <MayoToggle key={t.code} checked={festivalTypes.includes(t.code)} onChange={() => toggleFestivalType(t.code)} label={t.displayName} size="sm" color="blue" />
+                                ))}
+                            </div>
+                        </div>
+                        <MayoInput label="개최 일수" type="number" size="sm" min={2} max={180} placeholder="예: 3" value={durationDays} onChange={(e) => setDurationDays(e.target.value === "" ? "" : Number(e.target.value))} />
+                    </div>
+                </MayoCard>
+
+                {/* 제출 */}
+                <div className="flex items-center gap-3">
+                    <MayoBtn type="submit" disabled={loading || !metadata || !canSubmit} variant="primary" color="green" size="md" style={{ minWidth: 180 }}>
+                        {loading ? `계산 중 ${loadingProgress}%` : "계획예산 계산"}
+                    </MayoBtn>
                     {!canSubmit && (
-                        <p className="text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
+                        <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>
                             필요 항목: <span className="font-semibold">{missingRequiredFields.join(" · ")}</span>
                             {missingDueToSeries && " (과거 이력이 연도별로 달라 자동입력 안 됨)"}
                         </p>
                     )}
                 </div>
-            </MayoCard>
             </form>
 
             {error && <MayoAlert type="error">{error}</MayoAlert>}
