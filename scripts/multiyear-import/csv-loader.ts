@@ -17,9 +17,13 @@ export interface LoadedCsv {
  */
 export function loadCanonicalCsv(filePath: string): LoadedCsv {
   if (!fs.existsSync(filePath)) {
+    // 이 CSV는 .gitignore(/prisma/data/) 대상이라 clone만으로는 생기지 않는다.
+    // 팀원이 처음 돌릴 때 가장 먼저 만나는 에러이므로 어디에 무엇을 두라는 것까지 적는다.
     throw new Error(
       `CSV 파일을 찾을 수 없습니다: ${filePath}\n` +
-        `--file <경로> 로 지정하거나, prisma/data/festival_2017_2026_sanitized.csv 에 파일을 두세요.`
+        `이 파일은 git에 포함되지 않습니다(.gitignore: /prisma/data/).\n` +
+        `공유받은 festival_2017_2026.csv 를 prisma/data/ 아래에 두고 다시 실행하세요.\n` +
+        `다른 경로에 있다면 --file <경로> 로 지정할 수 있습니다.`
     );
   }
 

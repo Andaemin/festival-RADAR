@@ -1,7 +1,12 @@
 import type { DryRunReport } from "./stats";
 
 /** 로컬 프로젝트에서 사전 검증된 2017~2026 canonical dataset의 기대값.
- *  이 값과 다르면 importer가 조용히 숫자를 맞추지 말고 차이를 그대로 보고해야 한다. */
+ *  이 값과 다르면 importer가 조용히 숫자를 맞추지 말고 차이를 그대로 보고해야 한다.
+ *
+ *  기준 파일: prisma/data/festival_2017_2026.csv (2026-09-04 갱신).
+ *  이전 기준(festival_2017_2026_sanitized.csv) 대비 원본의 예산 자릿수 오류 10건이
+ *  모두 교정되어 UNIT_SCALE_SUSPECT가 0이 됐다(무주반딧불축제 2.5조원 → 25억원 등).
+ *  행 수·연도별 분포·source SHA256은 그대로이므로 데이터 교체가 아니라 값 교정이다. */
 export const EXPECTED_ROWS_BY_YEAR: Record<number, number> = {
   2017: 733,
   2018: 886,
@@ -16,21 +21,21 @@ export const EXPECTED_ROWS_BY_YEAR: Record<number, number> = {
 };
 export const EXPECTED_TOTAL_ROWS = 10198;
 
-export const EXPECTED_VALID = 9930;
-export const EXPECTED_MISSING_OR_NONPOSITIVE = 258;
-export const EXPECTED_UNIT_SCALE_SUSPECT = 10;
+export const EXPECTED_VALID = 9941;
+export const EXPECTED_MISSING_OR_NONPOSITIVE = 257;
+export const EXPECTED_UNIT_SCALE_SUSPECT = 0;
 
-export const EXPECTED_MULTI_TYPE_ROWS = 152;
+export const EXPECTED_MULTI_TYPE_ROWS = 154;
 export const EXPECTED_SOURCE_SHA_COUNT = 10;
 
 export const EXPECTED_MEDIAN_BY_YEAR: Record<number, number> = {
   2017: 200,
   2018: 200,
   2019: 200,
-  2020: 198,
-  2021: 166.4,
+  2020: 199,
+  2021: 168.2,
   2022: 170,
-  2023: 196,
+  2023: 192.5,
   2024: 200,
   2025: 200,
   2026: 204.5,

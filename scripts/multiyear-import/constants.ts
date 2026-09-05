@@ -11,7 +11,7 @@
  *  기존 버전 데이터 정리는 별도 단계다). */
 export const IMPORTER_VERSION = "1.0.1";
 
-export const DEFAULT_CSV_PATH = "prisma/data/festival_2017_2026_sanitized.csv";
+export const DEFAULT_CSV_PATH = "prisma/data/festival_2017_2026.csv";
 
 /** CSV에 반드시 존재해야 하는 header. 이름 기준으로 컬럼을 찾고, 위치(index)에 의존하지 않는다. */
 export const REQUIRED_HEADERS = [
