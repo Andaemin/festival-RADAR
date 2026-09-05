@@ -23,18 +23,21 @@ describe("computeReliabilityBacktestSummary - baseline parity(spec 1절)", () =>
     summary = computeReliabilityBacktestSummary(allSeriesRecords);
   }, 120_000);
 
-  it("Series n≈2242, HIGH/MEDIUM 분포, Estimate MdAPE가 알려진 production benchmark와 일치한다", () => {
+  // 이 수치는 canonical CSV에 종속된다. 원본 교체 시 함께 갱신할 것.
+  // festival_2017_2026.csv 기준(2026-09-04): 이전 sanitized 판에서 n=2242/HIGH=1200/MEDIUM=1042,
+  // HIGH MdAPE 0.0928. 예산 자릿수 오류 10건이 교정되며 series가 9개 늘고 HIGH 정확도가 소폭 개선됐다.
+  it("Series n≈2251, HIGH/MEDIUM 분포, Estimate MdAPE가 알려진 production benchmark와 일치한다", () => {
     expect(summary.foldYears).toEqual([...RELIABILITY_BACKTEST_FOLD_YEARS]);
-    expect(summary.seriesN).toBe(2242);
+    expect(summary.seriesN).toBe(2251);
 
     const high = summary.tiers.find((t) => t.tier === "HIGH")!;
     const medium = summary.tiers.find((t) => t.tier === "MEDIUM")!;
-    expect(high.n).toBe(1200);
-    expect(medium.n).toBe(1042);
+    expect(high.n).toBe(1211);
+    expect(medium.n).toBe(1040);
     expect(high.n + medium.n).toBe(summary.seriesN);
 
     // G0 production benchmark(연구 문서 재현값)와 parity - 소수점 오차만 허용.
-    expect(high.estimateMdApe).toBeCloseTo(0.0928, 3);
+    expect(high.estimateMdApe).toBeCloseTo(0.0909, 3);
     expect(medium.estimateMdApe).toBeCloseTo(0.1, 3);
   });
 

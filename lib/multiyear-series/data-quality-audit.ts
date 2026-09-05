@@ -22,6 +22,11 @@ import { FrozenSeriesGroup, FrozenSeriesModel, SeriesRecordLite } from "./types"
  * import하지 않고 다시 계산하지 않는다(이미 계산된 model/allSeriesRecords만 읽는다).
  *
  * 실제 데이터에서 확인된 대표 케이스(연구 근거):
+ *   ⚠️ 아래 밀양 2건은 canonical CSV가 festival_2017_2026.csv로 교체되며(2026-09-04) 원본에서
+ *      교정되어 **더 이상 이상치가 아니다**(각각 ratio 10.0 -> 1.0, 100.0 -> 1.0). 판정 로직의
+ *      근거로서는 그대로 유효하므로 남겨 두되, 현재 데이터의 golden case는
+ *      test/lib/multiyear-series/data-quality-audit-golden.test.ts 쪽을 볼 것
+ *      (DMZ 피스트레인 뮤직페스티벌 2021 / 옥천참옻축제 2020).
  *   - 밀양아리랑대축제 2023(제65회): budgetTotalMillion=23100, national=30+local=2280=2310
  *     -> ratio=10.0 (COMPONENT_SUM_MISMATCH)
  *   - 밀양대추축제(제14~16회): 2023=20M -> 2024=2000M(제15회) -> 2025=20M(제16회)

@@ -29,37 +29,39 @@ function findGroup(groups: SeriesGroupDataQualitySummary[], canonicalName: strin
 }
 
 describe("Series Data Quality Audit - 실제 DB golden case(spec 19절)", () => {
-  it("밀양대추축제 2024 — budgetQualityFlag=VALID인데 ratio≈100x, REVIEW_REQUIRED(HIGH) + DIGIT_SHIFT_PATTERN, 자동 제외되지 않음", async () => {
+  it("옥천참옻축제 2020 — budgetQualityFlag=VALID인데 ratio≈100x, REVIEW_REQUIRED(HIGH) + DIGIT_SHIFT_PATTERN, 자동 제외되지 않음", async () => {
     const groups = await auditWholeDataset();
-    const group = findGroup(groups, "밀양대추축제");
-    const row2024 = group.records.find((r) => r.datasetYear === 2024)!;
+    const group = findGroup(groups, "옥천참옻축제");
+    const row2020 = group.records.find((r) => r.datasetYear === 2020)!;
 
-    expect(row2024.budgetQualityFlag).toBe("VALID");
-    expect(row2024.budgetKrw).toBe(2_000_000_000);
-    expect(row2024.previousBudgetKrw).toBe(20_000_000);
-    expect(row2024.yearOverYearRatio).toBeCloseTo(100, 3);
-    expect(row2024.severity).toBe("HIGH");
-    expect(row2024.reasons).toEqual(
-      expect.arrayContaining(["YEAR_OVER_YEAR_SCALE_JUMP", "SERIES_PRIOR_MEDIAN_DEVIATION", "DIGIT_SHIFT_PATTERN", "ISOLATED_SPIKE_PATTERN"])
+    expect(row2020.budgetQualityFlag).toBe("VALID");
+    expect(row2020.budgetKrw).toBe(30_000_000);
+    expect(row2020.previousBudgetKrw).toBe(300_000);
+    expect(row2020.yearOverYearRatio).toBeCloseTo(100, 3);
+    expect(row2020.severity).toBe("HIGH");
+    expect(row2020.reasons).toEqual(
+      expect.arrayContaining(["YEAR_OVER_YEAR_SCALE_JUMP", "SERIES_PRIOR_MEDIAN_DEVIATION", "DIGIT_SHIFT_PATTERN"])
     );
-    expect(row2024.suspectedDigitShiftFactor).toBe(100);
+    expect(row2020.suspectedDigitShiftFactor).toBe(100);
 
     // "자동 제외되지 않는다" - 이 record가 여전히 group.records(=own-history eligibility를
     // 통과한 leakage-safe 목록)에 나타난다는 사실 자체가 증거다. 값이 바뀌지도 않았다.
-    expect(row2024.budgetKrw).toBe(2_000_000_000);
+    expect(row2020.budgetKrw).toBe(30_000_000);
   });
 
-  it("밀양아리랑대축제 2023 — total=23,100M vs national+local=2,310M, ratio=10.0, COMPONENT_SUM_MISMATCH + HIGH", async () => {
+  it("DMZ 피스트레인 뮤직페스티벌 2021 — total=160M vs national+local=1,600M, ratio=10.0, COMPONENT_SUM_MISMATCH + HIGH", async () => {
     const groups = await auditWholeDataset();
-    const group = findGroup(groups, "밀양아리랑대축제");
-    const row2023 = group.records.find((r) => r.datasetYear === 2023)!;
+    const group = findGroup(groups, "DMZ 피스트레인 뮤직페스티벌");
+    const row2021 = group.records.find((r) => r.datasetYear === 2021)!;
 
-    expect(row2023.budgetQualityFlag).toBe("VALID");
-    expect(row2023.componentTotalKrw).toBe(23_100_000_000);
-    expect(row2023.componentSumKrw).toBe(2_310_000_000);
-    expect(row2023.componentMismatchRatio).toBeCloseTo(10.0, 5);
-    expect(row2023.reasons).toContain("COMPONENT_SUM_MISMATCH");
-    expect(row2023.severity).toBe("HIGH");
+    // 구버전 golden case(밀양아리랑대축제 2023)는 총액이 내역 합보다 컸다. 이 사례는 반대로
+    // **내역 합이 총액보다** 10배 크다 - symmetricRatio가 방향과 무관하게 10.0을 내는지 함께 본다.
+    expect(row2021.budgetQualityFlag).toBe("VALID");
+    expect(row2021.componentTotalKrw).toBe(160_000_000);
+    expect(row2021.componentSumKrw).toBe(1_600_000_000);
+    expect(row2021.componentMismatchRatio).toBeCloseTo(10.0, 5);
+    expect(row2021.reasons).toContain("COMPONENT_SUM_MISMATCH");
+    expect(row2021.severity).toBe("HIGH");
   });
 
   it("부산국제록페스티벌 — 지속 성장(500→500→500→730→2930→4000→7200)은 DIGIT_SHIFT/ISOLATED_SPIKE/COMPONENT_MISMATCH로 오판되지 않는다(G0 estimate와 무관하게 HIGH 없음)", async () => {

@@ -52,13 +52,13 @@ describe("GET /api/v1/data-quality-audit", () => {
     expect(json.anomalies.every((r: { reasons: string[] }) => r.reasons.includes("COMPONENT_SUM_MISMATCH"))).toBe(true);
   });
 
-  it("q 필터 — 밀양대추축제만 검색하면 그 축제의 record만 온다(자동 제외 없이 여전히 노출됨)", async () => {
-    const { json } = await callAuditApi({ q: "밀양대추축제" });
+  it("q 필터 — 옥천참옻축제만 검색하면 그 축제의 record만 온다(자동 제외 없이 여전히 노출됨)", async () => {
+    const { json } = await callAuditApi({ q: "옥천참옻축제" });
     expect(json.anomalies.length).toBeGreaterThan(0);
-    expect(json.anomalies.every((r: { canonicalSeriesName: string }) => r.canonicalSeriesName.includes("밀양대추축제"))).toBe(true);
-    const row2024 = json.anomalies.find((r: { datasetYear: number }) => r.datasetYear === 2024);
-    expect(row2024?.severity).toBe("HIGH");
-    expect(row2024?.budgetKrw).toBe(2_000_000_000); // 값이 자동 수정되지 않았다.
+    expect(json.anomalies.every((r: { canonicalSeriesName: string }) => r.canonicalSeriesName.includes("옥천참옻축제"))).toBe(true);
+    const row2020 = json.anomalies.find((r: { datasetYear: number }) => r.datasetYear === 2020);
+    expect(row2020?.severity).toBe("HIGH");
+    expect(row2020?.budgetKrw).toBe(30_000_000); // 값이 자동 수정되지 않았다.
   });
 
   it("limit — 요청한 개수만큼만 반환하지만 matchedCount는 전체 매칭 수를 그대로 알려준다", async () => {
