@@ -811,13 +811,13 @@ function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudget
                 )}
                 <MayoCard variant="outlined" padding="sm">
                     <p className="text-xs font-semibold mb-1">추정 방식 / 신뢰도</p>
-                    <div className="grid grid-cols-2 gap-2">
-                        <div className="flex flex-col items-center">
-                            <MayoPieChart data={basisPieData} size={100} donut showLegend />
+                    <div className="grid grid-cols-2 gap-2 flex-1">
+                        <div className="flex flex-col items-center justify-center">
+                            <MayoPieChart data={basisPieData} size={120} donut showLegend />
                         </div>
-                        <div className="flex flex-col items-center">
-                            <MayoPieChart data={reliabilityPieData} size={100} donut />
-                            <span className="text-[10px] mt-1 font-semibold" style={{ color: "var(--mayo-text-muted)" }}>{RELIABILITY_LABEL[result.reliabilityTier]}</span>
+                        <div className="flex flex-col items-center justify-center">
+                            <MayoPieChart data={reliabilityPieData} size={120} donut />
+                            <span className="text-xs mt-2 font-semibold" style={{ color: "var(--mayo-text-muted)" }}>{RELIABILITY_LABEL[result.reliabilityTier]}</span>
                         </div>
                     </div>
                 </MayoCard>

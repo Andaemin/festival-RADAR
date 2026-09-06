@@ -24,7 +24,7 @@ export default function AppSidebar() {
     const pathname = usePathname();
 
     return (
-        <div className="flex flex-col h-screen" style={{ background: "var(--mayo-surface)", borderRight: "1px solid var(--mayo-border)" }}>
+        <div className="flex flex-col h-screen sticky top-0 shrink-0" style={{ background: "var(--mayo-surface)", borderRight: "1px solid var(--mayo-border)" }}>
             <div className="flex-1 overflow-y-auto">
                 <MayoSidebar items={SIDEBAR_ITEMS} activePath={pathname} />
             </div>
