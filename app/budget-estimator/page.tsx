@@ -144,7 +144,6 @@ export default function BudgetEstimatorPage() {
     // 기존 form state를 그대로 재사용해 자동기입한다 - 별도 "series 전용" 필드를 만들지 않는다.
     const [seriesSearchResults, setSeriesSearchResults] = useState<SeriesSearchResult[]>([]);
     const [seriesSearchLoading, setSeriesSearchLoading] = useState(false);
-    const [seriesSearchOpen, setSeriesSearchOpen] = useState(false);
     const [selectedSeries, setSelectedSeries] = useState<SeriesSearchResult | null>(null);
     // PHASE 6 — festivalName을 직접 수정해 선택돼 있던 series의 metadata를 초기화했을 때만
     // true. "즉시 안내"가 목적이라 별도 toast 없이 이 boolean 하나로 인라인 문구를 켠다 - 새
@@ -210,7 +209,7 @@ export default function BudgetEstimatorPage() {
         }
         if (value.trim().length < SEARCH_MIN_LENGTH) {
             setSeriesSearchResults([]);
-            setSeriesSearchOpen(false);
+            
             setSeriesSearchLoading(false);
         }
     }
@@ -235,7 +234,7 @@ export default function BudgetEstimatorPage() {
         setSeriesSearchText("");
         setSelectedSeries(null);
         setSeriesSearchResults([]);
-        setSeriesSearchOpen(false);
+        
         setMetadataResetNotice(false);
         setFestivalName("");
         setRegionCode("");
@@ -263,13 +262,10 @@ export default function BudgetEstimatorPage() {
                 .then((results) => {
                     if (cancelled) return;
                     setSeriesSearchResults(results);
-                    setSeriesSearchOpen(true);
                 })
                 .catch(() => {
                     if (cancelled) return;
-                    // 검색 실패가 목록 자체를 못 보여줄 뿐 다른 상태를 건드리지 않는다.
                     setSeriesSearchResults([]);
-                    setSeriesSearchOpen(true);
                 })
                 .finally(() => {
                     if (!cancelled) setSeriesSearchLoading(false);
@@ -301,7 +297,7 @@ export default function BudgetEstimatorPage() {
         }
         setSelectedSeries(null);
         setSeriesSearchResults([]);
-        setSeriesSearchOpen(false);
+        
         setMetadataResetNotice(false);
     }
 
@@ -321,7 +317,7 @@ export default function BudgetEstimatorPage() {
         setSeriesSearchText(result.canonicalName);
         setFestivalName(result.canonicalName);
         setSelectedSeries(result);
-        setSeriesSearchOpen(false);
+        
         setSeriesSearchResults([]);
         setMetadataResetNotice(false);
 
