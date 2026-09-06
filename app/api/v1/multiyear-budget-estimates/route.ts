@@ -14,6 +14,7 @@ import { getMultiYearDataRevision } from "@/lib/multiyear-series/data-revision";
 import { computeCpiAdjustedVolatility, computePlanningReliability, EMPTY_FROZEN_SERIES_MODEL } from "@/lib/multiyear-series/reliability";
 import { getCachedFrozenSeriesModel, getCachedSeriesRecords, getCachedVolatilityThreshold } from "@/lib/multiyear-series/runtime-cache";
 import { buildSeriesHistoryDetail, SeriesHistoryDetailDto } from "@/lib/multiyear-series/series-history-detail";
+import { resolveExplicitSeriesIdentity } from "@/lib/multiyear-series/series-identity";
 import { lookupTarget } from "@/lib/multiyear-series/series-lookup";
 import { computeSeriesSignal, SERIES_SIGNAL_NOT_REQUESTED, SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
 import { buildSyntheticTargetRecord } from "@/lib/multiyear-series/target-from-query";
@@ -148,10 +149,29 @@ export async function POST(request: NextRequest) {
     // 재사용해 raw dispersion 값만 노출한다. reliability tier 판정식 자체는 전혀 다시 만들지
     // 않는다 - computePlanningReliability(아래에서 호출)가 낸 tier/reasonKey를 그대로 표시할 뿐.
     let reliabilityHistoricalDispersion: number | null = null;
+    // PHASE — Explicit Series Identity Routing(additive). 자동 matcher(lookupTarget)는 그대로
+    // `query.district`(district hard gate 포함)를 쓰지만, 사용자가 검색 결과에서 직접 선택한
+    // 축제(`body.selectedSeriesIdentity`)일 때만 이 값을 그 축제 자신의 canonicalDistrict로
+    // 바꿔치기한다 - "이번 계획연도의 시군구 입력"과 "과거 series identity"를 분리하기 위함이다.
+    // Peer 경로(estimateForPlanning)는 여전히 `query.district`(사용자 원본 입력) 그대로 쓴다 -
+    // 이 변수는 Series 관련 호출(computeSeriesSignal/lookupTarget/computePlanningReliability)
+    // 에서만 쓴다.
+    let seriesMatchDistrict = query.district;
     if (festivalName && dataRevision !== null) {
       const allSeriesRecords = await getCachedSeriesRecords(prisma, dataRevision);
       const model = await getCachedFrozenSeriesModel(allSeriesRecords, dataRevision, planningYear);
-      seriesSignal = computeSeriesSignal(festivalName, query.region, query.district, query.typeTokens, planningYear, model);
+
+      const identity = body.selectedSeriesIdentity;
+      if (identity && identity.canonicalName.trim() === festivalName && identity.regionCode === regionCode) {
+        const resolution = resolveExplicitSeriesIdentity(identity, query.region, model);
+        // 못 찾거나(matchedGroupId===null) ambiguous면 seriesMatchDistrict는 위 기본값
+        // (query.district) 그대로 - 자동 matcher 경로로 안전하게 fallback한다(임의 매칭 없음).
+        if (resolution.matchedGroupId !== null) {
+          seriesMatchDistrict = model.groupsById.get(resolution.matchedGroupId)!.canonicalDistrict;
+        }
+      }
+
+      seriesSignal = computeSeriesSignal(festivalName, query.region, seriesMatchDistrict, query.typeTokens, planningYear, model);
       seriesModelForReliability = model;
       const thresholdResult = await getCachedVolatilityThreshold(allSeriesRecords, dataRevision, planningYear);
       volatilityThreshold = thresholdResult.threshold;
@@ -160,7 +180,7 @@ export async function POST(request: NextRequest) {
         const target = buildSyntheticTargetRecord({
           festivalName,
           region: query.region,
-          district: query.district,
+          district: seriesMatchDistrict,
           typeTokens: query.typeTokens,
           planningYear,
         });
@@ -207,7 +227,7 @@ export async function POST(request: NextRequest) {
       seriesSignal,
       festivalName ?? "",
       query.region,
-      query.district,
+      seriesMatchDistrict,
       query.typeTokens,
       planningYear,
       seriesModelForReliability,

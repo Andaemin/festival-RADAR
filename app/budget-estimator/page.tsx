@@ -363,6 +363,14 @@ export default function BudgetEstimatorPage() {
                 planningYear: Number(planningYear),
                 referenceDataPolicy: "HISTORICAL_ONLY",
                 festivalName: festivalName.trim() || undefined,
+                // PHASE — Explicit Series Identity Routing. 검색 결과에서 기존 축제를 직접
+                // 선택한 경우에만 보낸다(groupId 아님 - 선택 시점의 canonicalName + 현재
+                // regionCode만). 이번 계획연도의 district가 과거 이력과 달라도 이 축제가
+                // Peer로 오분류되지 않게 하기 위함이다(자동 매칭/자유입력에는 영향 없음).
+                selectedSeriesIdentity:
+                    festivalMode === "EXISTING" && selectedSeries !== null
+                        ? { canonicalName: selectedSeries.canonicalName, regionCode }
+                        : undefined,
             });
             setLoadingProgress(100);
             setResult(data);
