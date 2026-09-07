@@ -20,7 +20,7 @@ import type { MonthDistributionEntry } from "@/lib/planner/types";
 
 const SERIES = "#2a78d6";
 /** 추천 개최월. 채움색으로 표시하는 유일한 의미색이다. */
-const RECOMMENDED = "#1f9d55";
+const RECOMMENDED = "#25b366";
 /**
  * 희망 개최월 테두리. 막대와 같은 파랑이지만 outlineOffset으로 사이를 띄우기 때문에
  * 고리 모양으로 분명히 보인다 - 검정 테두리는 너무 무겁게 읽혔다.
