@@ -17,6 +17,12 @@ import { resolveSeriesDisplayState, SERIES_FALLBACK_MESSAGE } from "@/lib/multiy
 import { buildSeriesSearchResultKey, type SeriesSearchResult } from "@/lib/multiyear-series/series-search";
 import type { SeriesHistoryDetailDto, SeriesHistoryExclusionReason } from "@/lib/multiyear-series/series-history-detail";
 import type { DataQualityAuditReason, DataQualityAuditSeverity, SeriesDataQualityAuditRecord } from "@/lib/multiyear-series/data-quality-audit";
+import {
+    computeDurationChangeStatus,
+    computeDurationScenario,
+    deriveComparisonDuration,
+    validateVariableCostInput,
+} from "@/lib/multiyear-series/duration-scenario";
 import { quantile } from "@/lib/utils/weighted-statistics";
 import {
     MayoAccordion,
@@ -150,6 +156,17 @@ export default function BudgetEstimatorPage() {
     // series 선택/제출/연도 변경처럼 문맥이 바뀌면 각 핸들러에서 다시 false로 되돌린다.
     const [metadataResetNotice, setMetadataResetNotice] = useState(false);
 
+    // Feature: Series 기간 변경 계획 시뮬레이션(§7/§8) — "기간에 따라 증감하는 1일 변동비" 입력.
+    // 문자열 state로 둔다(빈 값 허용, 타이핑 중간 상태를 그대로 보존 - Number("")===0으로
+    // 조용히 바뀌는 것을 막기 위해 validateVariableCostInput에서만 숫자로 해석한다). AI가 기본값을
+    // 채우지 않는다 - 항상 빈 문자열로 시작한다. §15에 따라 selectedSeries/planningYear/
+    // festivalMode를 바꾸는 모든 핸들러(handleSeriesSearchTextChange/handleFestivalModeChange/
+    // handlePlanningYearChange/handleSelectSeries)에서 직접 초기화한다 - effect의 setState는
+    // cascading render를 유발해 이 프로젝트 lint 규칙(react-hooks/set-state-in-effect)이 금지한다.
+    // durationDays 변경 핸들러에서는 건드리지 않는다 - 기간만 바꿀 때는 입력값을 유지한다(§9의
+    // "G: duration만 변경" 요구사항).
+    const [variableCostPerDayKrwInput, setVariableCostPerDayKrwInput] = useState("");
+
     useEffect(() => {
         fetch("/api/v1/metadata")
             .then((r) => r.json())
@@ -203,6 +220,8 @@ export default function BudgetEstimatorPage() {
             setFestivalTypes([]);
             setVenueType("");
             setMetadataResetNotice(true);
+            // §15 — selectedSeries가 바뀌므로(이전 선택 해제) 입력해 둔 기간 변동비도 초기화한다.
+            setVariableCostPerDayKrwInput("");
         }
         if (value.trim() === "") {
             setMetadataResetNotice(false);
@@ -234,13 +253,15 @@ export default function BudgetEstimatorPage() {
         setSeriesSearchText("");
         setSelectedSeries(null);
         setSeriesSearchResults([]);
-        
+
         setMetadataResetNotice(false);
         setFestivalName("");
         setRegionCode("");
         setDistrict("");
         setFestivalTypes([]);
         setVenueType("");
+        // §15 — festivalMode 변경 시 입력해 둔 기간 변동비도 초기화한다.
+        setVariableCostPerDayKrwInput("");
     }
 
     /** PHASE 6 — 2자 이상 입력 시에만, 약 250ms debounce로 검색한다(EXISTING mode에서만 - NEW
@@ -297,8 +318,11 @@ export default function BudgetEstimatorPage() {
         }
         setSelectedSeries(null);
         setSeriesSearchResults([]);
-        
+
         setMetadataResetNotice(false);
+        // §15 — planningYear 변경 시 입력해 둔 기간 변동비도 초기화한다(leakage-safe pool 자체가
+        // 달라지므로 이전 시나리오 가정을 그대로 이어가지 않는다).
+        setVariableCostPerDayKrwInput("");
     }
 
     /**
@@ -317,9 +341,12 @@ export default function BudgetEstimatorPage() {
         setSeriesSearchText(result.canonicalName);
         setFestivalName(result.canonicalName);
         setSelectedSeries(result);
-        
+
         setSeriesSearchResults([]);
         setMetadataResetNotice(false);
+        // §15 — 새 series를 선택하면(다른 축제로 전환) 입력해 둔 기간 변동비도 초기화한다. 다른
+        // 축제에 이전 축제의 변동비가 그대로 남지 않게 한다.
+        setVariableCostPerDayKrwInput("");
 
         setRegionCode(result.fieldStatus.region === "STABLE" && result.autoFill.regionCode ? result.autoFill.regionCode : "");
         setDistrict(result.fieldStatus.district === "STABLE" && result.autoFill.district ? result.autoFill.district : "");
@@ -615,7 +642,19 @@ export default function BudgetEstimatorPage() {
                     </p>
                 </MayoCard>
             )}
-            {result && !loading && <ResultPane result={result} requestedDurationDays={submittedDurationDays} />}
+            {result && !loading && (
+                <ResultPane
+                    result={result}
+                    requestedDurationDays={submittedDurationDays}
+                    // Feature: Series 기간 변경 계획 시뮬레이션 — "이번 계획기간"은 현재 폼의
+                    // durationDays를 그대로 쓴다(Series는 durationDays가 production 계산에 전혀
+                    // 쓰이지 않으므로, 제출 없이 값을 바꿔도 즉시 재계산할 수 있다 - §18/§22-9).
+                    // 값이 비어 있으면(isDurationValid 실패) 마지막으로 제출된 값으로 대체한다.
+                    targetDurationDays={isDurationValid(durationDays) ? Number(durationDays) : submittedDurationDays}
+                    variableCostPerDayKrwInput={variableCostPerDayKrwInput}
+                    onVariableCostPerDayKrwInputChange={setVariableCostPerDayKrwInput}
+                />
+            )}
 
             {/* ── 전체 감사 (항상 표시) ── */}
             <MayoAccordion
@@ -673,7 +712,19 @@ function seriesHistorySummary(result: MultiYearBudgetEstimateResponse): string {
     }
 }
 
-function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudgetEstimateResponse; requestedDurationDays: number | null }) {
+function ResultPane({
+    result,
+    requestedDurationDays,
+    targetDurationDays,
+    variableCostPerDayKrwInput,
+    onVariableCostPerDayKrwInputChange,
+}: {
+    result: MultiYearBudgetEstimateResponse;
+    requestedDurationDays: number | null;
+    targetDurationDays: number | null;
+    variableCostPerDayKrwInput: string;
+    onVariableCostPerDayKrwInputChange: (value: string) => void;
+}) {
     const isSeries = result.estimateBasis === "SERIES_HISTORY_MEDIAN";
     const seriesDisplay = resolveSeriesDisplayState(result.estimateBasis, result.seriesSignal);
     const noSample = result.sampleCount === 0;
@@ -848,9 +899,203 @@ function ResultPane({ result, requestedDurationDays }: { result: MultiYearBudget
                 </MayoCard>
             )}
 
+            {/* Feature: Series 기간 변경 계획 시뮬레이션 — Series에서만, 데이터 기반 예산과
+                시각적으로 분리된 별도 영역(§2/§11). Peer(estimateBasis===PEER_SIMILARITY)에서는
+                기존 duration adjustment가 이미 production 계산에 들어가 있으므로 표시하지 않는다. */}
+            {seriesDisplay.kind === "SERIES_APPLIED" && result.seriesHistoryDetail && targetDurationDays !== null && (
+                <DurationScenarioSection
+                    detail={result.seriesHistoryDetail}
+                    recommendedBudgetKrw={result.recommendedBudgetKrw}
+                    targetDurationDays={targetDurationDays}
+                    variableCostPerDayKrwInput={variableCostPerDayKrwInput}
+                    onVariableCostPerDayKrwInputChange={onVariableCostPerDayKrwInputChange}
+                />
+            )}
+
             {/* Row 4: 상세 섹션 — MayoAccordion */}
             <MayoAccordion items={accordionItems} multiple bordered />
         </div>
+    );
+}
+
+/**
+ * Feature: Series 기간 변경 계획 시뮬레이션.
+ *
+ * 이 컴포넌트가 절대 하지 않는 것(스펙 24절): `recommendedBudgetKrw`/`estimatedBudgetKrw`를
+ * 재계산하거나 덮어쓰지 않는다, 1일 변동비를 AI가 임의로 채우지 않는다(항상 빈 값 시작),
+ * estimate API를 재호출하지 않는다(입력마다 즉시 클라이언트 연산만 수행 - §18).
+ *
+ * 데이터 기반 예산(위 Row 1~3)과 시각적으로 분리된 별도 카드로 렌더링한다(§11) - 같은 강조도로
+ * 섞지 않는다.
+ */
+function DurationScenarioSection({
+    detail,
+    recommendedBudgetKrw,
+    targetDurationDays,
+    variableCostPerDayKrwInput,
+    onVariableCostPerDayKrwInputChange,
+}: {
+    detail: SeriesHistoryDetailDto;
+    recommendedBudgetKrw: number;
+    targetDurationDays: number;
+    variableCostPerDayKrwInput: string;
+    onVariableCostPerDayKrwInputChange: (value: string) => void;
+}) {
+    // §12 — 과거 개최기간 정보 자체가 없으면 임의 기간을 만들지 않고 시뮬레이션을 제공하지 않는다.
+    const comparison = deriveComparisonDuration(detail);
+    if (comparison === null) {
+        return (
+            <MayoCard variant="outlined" padding="md">
+                <p className="text-xs font-semibold mb-2" style={{ color: "var(--mayo-text-muted)" }}>기간 변경 시뮬레이션</p>
+                <p className="text-sm" style={{ color: "var(--mayo-text-muted)" }}>과거 개최기간 정보가 없어 기간 변경 시뮬레이션을 제공할 수 없습니다.</p>
+            </MayoCard>
+        );
+    }
+
+    const status = computeDurationChangeStatus(comparison.comparisonDurationDays, targetDurationDays);
+    const delta = targetDurationDays - comparison.comparisonDurationDays;
+    // §14 — LATEST branch에서 point-estimate source row와 최근 duration row가 같은 연도면
+    // "자연스럽게" 이어 보여줄 수 있다. MEDIAN에서는(§13) 이 문장을 절대 만들지 않는다 - 예산
+    // 산정 기준과 기간 비교 기준이 다른 record일 수 있기 때문이다.
+    const sameYearAsBudgetSource = detail.estimateSource === "LATEST" && comparison.comparisonDurationYear === detail.latestHistoricalYear;
+
+    // §5 — 기간이 같으면("SAME") 짧은 안내만 표시하고 시뮬레이션 입력은 숨긴다.
+    if (status === "SAME") {
+        return (
+            <MayoCard variant="outlined" padding="md">
+                <p className="text-xs font-semibold mb-2" style={{ color: "var(--mayo-text-muted)" }}>기간 변경 시뮬레이션</p>
+                <p className="text-sm" style={{ color: "var(--mayo-text)" }}>
+                    최근 확인된 개최기간({comparison.comparisonDurationDays}일)과 이번 계획기간이 동일합니다.
+                </p>
+            </MayoCard>
+        );
+    }
+
+    // 이 아래로는 status가 항상 INCREASE 또는 DECREASE다(SAME은 위에서 이미 반환, UNKNOWN은
+    // comparison!==null이면 나올 수 없다 - computeDurationChangeStatus 참고). 문구 전체를 "기존보다
+    // 하루가 늘거나 줄 때"라는 하나의 프레임으로 통일하기 위해 boolean으로만 분기한다.
+    const isIncrease = status === "INCREASE";
+    const absDelta = Math.abs(delta);
+
+    const validation = validateVariableCostInput(variableCostPerDayKrwInput);
+    const scenario =
+        validation.value !== null
+            ? computeDurationScenario({
+                  recommendedBudgetKrw,
+                  comparisonDurationDays: comparison.comparisonDurationDays,
+                  targetDurationDays,
+                  variableCostPerDayKrw: validation.value,
+              })
+            : null;
+    // §16 — scenario budget이 0 미만이면 자동 clamp하지 않고 명시적으로 경고한다.
+    const scenarioNegative = scenario !== null && scenario.scenarioRecommendedBudgetKrw < 0;
+
+    // §4 — 입력 항목 명칭: 기간 증가는 "추가 운영 1일당 예상 비용", 감소는 "감소 운영 1일당
+    // 절감 가능 비용"으로 각각 부른다(공통 "1일 변동비" 문구는 어느 쪽으로도 오해될 수 있어 폐기).
+    const inputLabel = isIncrease ? "추가 운영 1일당 예상 비용" : "감소 운영 1일당 절감 가능 비용";
+    const periodLabel = isIncrease ? "추가 운영기간" : "감소 운영기간";
+    const adjustmentLabel = isIncrease ? "예상 추가 운영비" : "예상 절감액";
+
+    return (
+        <MayoCard variant="outlined" padding="md" style={{ border: "1px dashed var(--mayo-border)" }}>
+            <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-semibold" style={{ color: "var(--mayo-text-muted)" }}>기간 변경 시뮬레이션</p>
+                <MayoTag color="gray" variant="outline" size="sm">사용자 입력 기반</MayoTag>
+            </div>
+
+            {/* §11 — "왜 기간을 자동 반영하지 않았는가"를 반드시 설명한다(버그처럼 보이지 않게). */}
+            <MayoAlert type="info">
+                <span className="font-semibold">개최기간 변경 안내</span>
+                <p className="mt-1">
+                    동일 축제의 과거 데이터를 검증한 결과, 개최일수 변화만으로 계획예산 변화를 안정적으로 예측하기 어려워 기간을 예산에 자동 반영하지 않습니다.
+                    대신 실제 기획 과정에서 추가로 발생하거나 절감되는 운영비를 사용자가 직접 입력해 계획 시나리오를 확인할 수 있습니다.
+                </p>
+            </MayoAlert>
+
+            {/* §5 — 입력에 앞서 "며칠이 늘거나 줄었는지"를 먼저 명확히 보여준다. */}
+            <div className="grid grid-cols-3 gap-2 mt-3 mb-1">
+                <MiniStat label="최근 확인된 개최기간" value={`${comparison.comparisonDurationDays}일 (${comparison.comparisonDurationYear}년)`} />
+                <MiniStat label="이번 계획기간" value={`${targetDurationDays}일`} />
+                <MiniStat label={periodLabel} value={`${isIncrease ? "+" : "-"}${absDelta}일`} />
+            </div>
+            {sameYearAsBudgetSource && (
+                <p className="text-[10px] mb-2" style={{ color: "var(--mayo-text-muted)" }}>
+                    최근 예산 이력({detail.latestHistoricalYear}년)과 동일 연도의 개최기간입니다.
+                </p>
+            )}
+            {!sameYearAsBudgetSource && detail.estimateSource === "MEDIAN" && (
+                <p className="text-[10px] mb-2" style={{ color: "var(--mayo-text-muted)" }}>
+                    위 예상/추천 예산은 과거 이력 중앙값 기준이며, 기간 비교 기준({comparison.comparisonDurationYear}년)과는 다른 연도일 수 있습니다.
+                </p>
+            )}
+
+            <MayoDivider />
+
+            {/* §2/§4 — 입력값의 의미를 "총예산÷일수"나 "첫날 운영비"가 아니라 "하루가 늘거나 줄 때
+                새롭게 증가·절감되는 비용"으로 명확히 한다. */}
+            <div className="mt-2">
+                <MayoInput
+                    label={`${inputLabel} (원)`}
+                    type="number"
+                    size="sm"
+                    min={0}
+                    placeholder="예: 30000000"
+                    value={variableCostPerDayKrwInput}
+                    onChange={(e) => onVariableCostPerDayKrwInputChange(e.target.value)}
+                />
+                {isIncrease ? (
+                    <p className="text-[11px] mt-1" style={{ color: "var(--mayo-text-muted)" }}>
+                        기존 개최기간보다 하루를 더 운영할 때 새롭게 발생할 것으로 예상되는 비용을 입력하세요. (예: 추가 인력, 안전·경비, 청소, 프로그램 운영, 숙박, 일일 장비 임차 등)
+                        무대 설치비, 전체 홍보비, 디자인비 등 개최일수와 관계없이 발생하는 비용은 제외하는 것을 권장합니다.
+                    </p>
+                ) : (
+                    <p className="text-[11px] mt-1" style={{ color: "var(--mayo-text-muted)" }}>
+                        개최기간이 줄어도 모든 비용이 동일한 비율로 절감되는 것은 아닙니다. 인력·경비·청소·일일 임차료 등 실제로 줄일 수 있다고 판단되는 비용만 입력하세요.
+                    </p>
+                )}
+                {!validation.valid && variableCostPerDayKrwInput.trim() !== "" && (
+                    <p className="text-[11px] mt-1" style={{ color: "var(--mayo-danger, #dc2626)" }}>{validation.errorMessage}</p>
+                )}
+            </div>
+
+            {/* 입력 전/후 결과 */}
+            {scenario === null ? (
+                <p className="text-sm mt-3" style={{ color: "var(--mayo-text-muted)" }}>{inputLabel}을 입력하면 조정 계획예산을 확인할 수 있습니다.</p>
+            ) : scenarioNegative ? (
+                <div className="mt-3">
+                    <MayoAlert type="error">
+                        조정 결과가 0원 미만이 될 수 없습니다. 입력한 값을 확인해주세요.
+                        <div className="font-mono text-xs mt-1">
+                            {absDelta}일 × {fmt(validation.value!)} = {fmt(scenario.durationAdjustmentKrw)} ({adjustmentLabel}) → 조정 계획예산 {fmt(scenario.scenarioRecommendedBudgetKrw)}
+                        </div>
+                    </MayoAlert>
+                </div>
+            ) : (
+                <div className="mt-3">
+                    <FieldGrid
+                        rows={[
+                            ["추천 계획예산", fmt(recommendedBudgetKrw)],
+                            [periodLabel, `${isIncrease ? "+" : "-"}${absDelta}일`],
+                            [inputLabel, `${fmt(validation.value!)} / 일`],
+                        ]}
+                    />
+                    {/* §9 — 결과 숫자만 나열하지 않고 계산 근거(N일 × 1일당 비용)가 그대로 보이도록
+                        한다(RecommendationCheckCard와 같은 font-mono 검산 블록 스타일 재사용). */}
+                    <div className="font-mono text-xs rounded p-3 mt-2 flex flex-col gap-0.5" style={{ background: "var(--mayo-bg-subtle)" }}>
+                        <div>{adjustmentLabel}</div>
+                        <div>{absDelta}일 × {fmt(validation.value!)}</div>
+                        <div>= {scenario.durationAdjustmentKrw >= 0 ? "+" : ""}{fmt(scenario.durationAdjustmentKrw)}</div>
+                    </div>
+                    <div className="rounded-lg p-3 mt-2" style={{ background: "var(--mayo-bg-subtle)" }}>
+                        <span className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>조정 계획예산</span>
+                        <div className="text-lg font-bold" style={{ color: "var(--mayo-primary, #2563eb)" }}>{fmt(scenario.scenarioRecommendedBudgetKrw)}</div>
+                    </div>
+                    <p className="text-[11px] mt-2" style={{ color: "var(--mayo-text-muted)" }}>
+                        <span className="font-semibold">조정 계획예산은 AI가 새로 예측한 값이 아닙니다.</span> 데이터 기반 추천예산에 사용자가 직접 입력한 {isIncrease ? "추가 운영비" : "절감 가능 비용"}를 반영한 계획 시나리오입니다.
+                    </p>
+                </div>
+            )}
+        </MayoCard>
     );
 }
 
