@@ -68,13 +68,21 @@ export function buildMonthDistribution(
 
     for (let month = 1; month <= 12; month++) {
         const inMonth = live.filter((r) => r.startMonth === month);
+        // 막대 높이(regionSameTypeCount)와 이름 목록이 같은 배열에서 나와야 어긋나지 않는다.
+        const sameType = inMonth.filter(
+            (r) => r.region === region && r.festivalType === festivalType
+        );
+
         entries.push({
             month,
             nationalCount: inMonth.length,
             regionCount: inMonth.filter((r) => r.region === region).length,
-            regionSameTypeCount: inMonth.filter(
-                (r) => r.region === region && r.festivalType === festivalType
-            ).length,
+            regionSameTypeCount: sameType.length,
+            // 전부 담는다. 실측 최악값이 한 달 43건·조합 연간 128건이라 12개월치를 모두
+            // 실어도 3KB 남짓이다. 방문객 많은 순이라 목록 앞쪽이 곧 주요 경쟁자다.
+            sameTypeFestivalNames: [...sameType]
+                .sort((a, b) => (b.visitors ?? 0) - (a.visitors ?? 0))
+                .map((r) => r.festivalName),
         });
     }
 

@@ -89,6 +89,12 @@ export interface MonthDistributionEntry {
     nationalCount: number;
     regionCount: number;
     regionSameTypeCount: number;
+    /**
+     * regionSameTypeCount에 실제로 센 축제들의 이름 전체. 방문객이 많은 순이라
+     * 목록 앞쪽이 곧 주요 경쟁자다. "6건"이라는 숫자만으로는 누구와 겹치는지 알 수
+     * 없어 함께 내려준다 - 길이는 regionSameTypeCount와 항상 같다.
+     */
+    sameTypeFestivalNames: string[];
 }
 
 export interface BudgetEfficiencySummary {
