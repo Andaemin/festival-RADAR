@@ -21,7 +21,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <html lang="ko" data-theme="light" className={`${pretendard.variable} h-full antialiased`}>
             <body className="min-h-full flex">
                 <AppSidebar />
-                <main className="flex-1 min-h-screen overflow-auto">
+                <main className="flex-1 min-h-screen overflow-auto pt-12 md:pt-0">
                     {children}
                 </main>
             </body>

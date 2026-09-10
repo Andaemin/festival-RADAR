@@ -660,8 +660,8 @@ export default function BudgetEstimatorPage() {
             <MayoAccordion
                 bordered
                 items={[
-                    { value: "data-quality", label: "전체 데이터 품질 감사 (Series Data Quality Audit)", children: <GlobalDataQualityAuditInner /> },
-                    { value: "reliability", label: "전체 Reliability 감사 (G0 이후 재검증, leakage-safe backtest)", children: <GlobalReliabilityAuditInner /> },
+                    { value: "data-quality", label: "전체 데이터 품질 감사 (Series Data Quality Audit)", children: <LazyAuditSection><GlobalDataQualityAuditInner /></LazyAuditSection> },
+                    { value: "reliability", label: "전체 Reliability 감사 (G0 이후 재검증, leakage-safe backtest)", children: <LazyAuditSection><GlobalReliabilityAuditInner /></LazyAuditSection> },
                 ]}
             />
         </main>
@@ -1729,12 +1729,21 @@ const AUDIT_SEVERITY_TAB_OPTIONS: { value: DataQualityAuditSeverity | "ALL"; lab
     { value: "INFO", label: "참고" },
 ];
 
-/**
- * 17/18절 — "전체 데이터 품질 감사"(READ-ONLY DIAGNOSTIC). 특정 estimate 결과와 무관하게 항상
- * 표시된다(어떤 series-linked VALID record가 review 우선순위가 높은지, 보유 데이터 전체 기준).
- * `GET /api/v1/data-quality-audit`을 처음 펼쳤을 때만 호출한다(페이지 로드마다 자동 호출하지
- * 않음).
- */
+/** MayoAccordion children은 접혀 있어도 마운트되므로, 사용자가 "불러오기"를 눌러야만
+ *  실제 Inner를 렌더한다. 페이지 진입 시 22초짜리 API 2개가 동시에 호출되어 네비게이션을
+ *  막는 문제를 방지한다. */
+function LazyAuditSection({ children }: { children: React.ReactNode }) {
+    const [activated, setActivated] = useState(false);
+    if (activated) return <>{children}</>;
+    return (
+        <div className="flex justify-center py-4">
+            <MayoBtn variant="secondary" size="sm" color="blue" onClick={() => setActivated(true)}>
+                불러오기
+            </MayoBtn>
+        </div>
+    );
+}
+
 /** MayoAccordion용 Inner — 마운트 시 자동 fetch. */
 function GlobalDataQualityAuditInner() {
     const [loading, setLoading] = useState(false);
