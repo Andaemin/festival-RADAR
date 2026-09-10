@@ -317,7 +317,7 @@ export default function PlannerPage() {
             .filter((r) => r.kind !== "BUDGET_EFFICIENCY" && r.opportunityScore > 0)
             .sort((a, b) => b.opportunityScore - a.opportunityScore)
             .map((r) => ({
-                label: r.title.length > 15 ? r.title.slice(0, 14) + "…" : r.title,
+                label: r.title.length > 8 ? r.title.slice(0, 7) + "…" : r.title,
                 점수: r.opportunityScore,
             }))
         : [];
@@ -496,12 +496,14 @@ export default function PlannerPage() {
                         {opportunityChartData.length > 0 && (
                             <MayoCard variant="outlined" padding="md">
                                 <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>기회 점수 비교</p>
-                                <MayoBarChart
-                                    data={opportunityChartData}
-                                    series={[{ key: "점수", color: "#10b981", label: "기회 점수" }]}
-                                    height={160}
-                                    showGrid
-                                />
+                                <div className="slim-bar-chart">
+                                    <MayoBarChart
+                                        data={opportunityChartData}
+                                        series={[{ key: "점수", color: "#10b981", label: "기회 점수" }]}
+                                        height={280}
+                                        showGrid
+                                    />
+                                </div>
                             </MayoCard>
                         )}
                         <MonthChart

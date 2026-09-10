@@ -50,3 +50,10 @@ body {
   font-family: "TossFace", "Apple Color Emoji", "Segoe UI Emoji", sans-serif !important;
   font-size: 16px;
 }
+
+/* 바 차트 막대만 시각적으로 얇게 — 컨테이너는 전체 활용 */
+.slim-bar-chart .mayo-bar-chart__bar {
+  transform: scaleX(0.4);
+  transform-box: fill-box;
+  transform-origin: center bottom;
+}
