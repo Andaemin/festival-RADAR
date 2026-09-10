@@ -16,6 +16,15 @@ import { DURATION_BUCKETS, analyzeWhitespace, durationBucketOf } from "./whitesp
 /** 근거 축제는 카드당 이만큼만 보여준다. */
 const REFERENCE_LIMIT = 4;
 
+/**
+ * 예산 통계를 지역 코호트로 낼 최소 표본.
+ *
+ * 이보다 적으면 중앙값이 한두 건에 휘둘려서 전국 코호트로 갈아탄다. 갈아탄 사실은
+ * budgetEfficiency.cohortScope로 화면에 전달된다 - 조용히 바꾸면 "우리 지역 N건"이라는
+ * 문구가 실제로 0건인 지역에 붙는다.
+ */
+const MIN_REGION_BUDGET_COHORT = 8;
+
 function pct(score: number): number {
     return Math.round(Math.min(1, Math.max(0, score)) * 100);
 }
@@ -87,8 +96,11 @@ export function generateRecommendations({ request, all, datasetYearRange, climat
     const seasonality = buildKeywordSeasonality(all);
     const activeSince = activeSinceYear(all);
     const monthDistribution = buildMonthDistribution(all, region, festivalType, activeSince);
+    const budgetCohortScope =
+        regionSameType.length >= MIN_REGION_BUDGET_COHORT ? "REGION" : "NATIONAL";
     const budgetEfficiency = summarizeBudgetEfficiency(
-        regionSameType.length >= 8 ? regionSameType : nationalSameType
+        budgetCohortScope === "REGION" ? regionSameType : nationalSameType,
+        budgetCohortScope
     );
 
     const targetMonth = request.startMonth ?? null;

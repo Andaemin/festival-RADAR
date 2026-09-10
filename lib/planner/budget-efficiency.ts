@@ -1,4 +1,4 @@
-import { BudgetEfficiencySummary, PlannerRecord, ReferenceFestival } from "./types";
+import { BudgetEfficiencySummary, BudgetScatterPoint, PlannerRecord, ReferenceFestival } from "./types";
 import { toReferenceFestival } from "./reference";
 
 /**
@@ -11,6 +11,15 @@ import { toReferenceFestival } from "./reference";
 
 /** 이 인원 미만은 분모가 불안정해 제외한다. */
 const MIN_VISITORS = 1_000;
+
+/**
+ * 산점도에 실어 보낼 점의 상한.
+ *
+ * 전국 코호트는 문화예술만 1,152건이라 그대로 보내면 응답이 부풀고 점도 뭉갠다.
+ * 넘칠 때는 1인당 투입비 순으로 줄 세운 뒤 균등 간격으로 솎아낸다 - 앞에서 자르면
+ * 저비용 쪽만 남아 분포가 왜곡되기 때문이다.
+ */
+const MAX_SCATTER_POINTS = 250;
 
 /** 상·하위 이상치를 이 분위수로 절단(winsorize)한다. */
 const WINSOR_LOW = 0.05;
@@ -31,7 +40,11 @@ function quantile(sorted: number[], q: number): number | null {
     return next !== undefined ? sorted[base] + rest * (next - sorted[base]) : sorted[base];
 }
 
-export function summarizeBudgetEfficiency(cohort: PlannerRecord[]): BudgetEfficiencySummary {
+export function summarizeBudgetEfficiency(
+    cohort: PlannerRecord[],
+    /** cohort가 지역 것인지 전국 것인지. 계산에는 쓰지 않고 화면 문구 판단에만 쓴다. */
+    cohortScope: BudgetEfficiencySummary["cohortScope"]
+): BudgetEfficiencySummary {
     const scored = cohort
         .map((r) => ({ record: r, cpv: costPerVisitor(r) }))
         .filter((x): x is { record: PlannerRecord; cpv: number } => x.cpv !== null);
@@ -42,7 +55,9 @@ export function summarizeBudgetEfficiency(cohort: PlannerRecord[]): BudgetEffici
             p25CostPerVisitorKrw: null,
             p75CostPerVisitorKrw: null,
             sampleCount: 0,
+            cohortScope,
             topEfficient: [],
+            scatter: [],
         };
     }
 
@@ -72,11 +87,25 @@ export function summarizeBudgetEfficiency(cohort: PlannerRecord[]): BudgetEffici
         .slice(0, 5)
         .map((x) => toReferenceFestival(x.record));
 
+    const byCpv = [...scored].sort((a, b) => a.cpv - b.cpv);
+    const step = Math.ceil(byCpv.length / MAX_SCATTER_POINTS);
+    const scatter: BudgetScatterPoint[] = byCpv
+        .filter((_, i) => i % step === 0)
+        .map((x) => ({
+            festivalName: x.record.festivalName,
+            // costPerVisitor()를 통과했으므로 두 값 모두 유효한 양수다.
+            totalBudgetKrw: x.record.totalBudgetKrw as number,
+            visitors: x.record.visitors as number,
+            costPerVisitorKrw: Math.round(x.cpv),
+        }));
+
     return {
         medianCostPerVisitorKrw: round(quantile(trimmed, 0.5)),
         p25CostPerVisitorKrw: round(quantile(trimmed, 0.25)),
         p75CostPerVisitorKrw: round(quantile(trimmed, 0.75)),
         sampleCount: scored.length,
+        cohortScope,
         topEfficient,
+        scatter,
     };
 }

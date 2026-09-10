@@ -1,5 +1,5 @@
 import { VENUE_TYPE_DISPLAY, VenueType } from "@/lib/domain/enums";
-import { PlannerRecord, WhitespaceAxisEntry, WhitespaceReport } from "./types";
+import { PlannerRecord, WhitespaceAxisEntry, WhitespaceGridCell, WhitespaceReport } from "./types";
 
 /**
  * 화이트스페이스 분석.
@@ -77,6 +77,71 @@ function scoreAxis(
     );
 }
 
+/** 격자에 세울 장소 유형. "미정"은 기획 선택지가 아니라 제외한다. */
+const GRID_VENUES: VenueType[] = Object.values(VenueType).filter((v) => v !== VenueType.UNDECIDED);
+
+/**
+ * 장소 x 시기 격자.
+ *
+ * 축을 따로 보면 "10월이 기회"까지만 나오는데, 실제 기획은 "10월에 어디서"를 함께
+ * 정해야 한다. 두 축을 겹쳐 결합분포로 센다 - 점수 공식은 scoreAxis와 같다.
+ *
+ * **희소성 기준만 1D와 다르다.** scoreAxis는 `regionCount / regionTotal`을 쓰는데,
+ * 60칸으로 쪼개면 지역 건수가 칸마다 한두 건이라 어느 칸이든 희소성이 0.95를 넘는다
+ * (실측 경기/문화예술: 43개 칸 중 대부분이 90점대로 뭉쳤다). 그래서 격자는
+ * findLeastSaturatedMonths와 같은 **기대치 대비**로 잰다 - 이미 시기 추천이 쓰는 개념이다.
+ *
+ *   기대치   = 지역 총건수 x (그 칸의 전국 비중)
+ *   희소성   = 1 - 실제 / 기대치        (기대만큼 하고 있으면 0, 전혀 없으면 1)
+ *
+ * **장소 유형은 2025~2026 원본에만 있는 항목이라 코퍼스의 절반쯤에만 채워져 있다**
+ * (실측 3,584건 중 1,638건). 그래서 격자는 코호트 전체가 아니라 "장소·시기가 모두
+ * 기록된 축제"만 센다. 화면이 이 사실을 밝힐 수 있도록 집계에 쓴 건수도 함께 돌려준다.
+ */
+function buildVenueMonthGrid(
+    national: PlannerRecord[],
+    region: PlannerRecord[]
+): { grid: WhitespaceGridCell[]; coverage: { national: number; region: number } } {
+    const hasBoth = (r: PlannerRecord): boolean =>
+        r.venueType !== null && r.venueType !== VenueType.UNDECIDED && r.startMonth !== null;
+
+    const nat = national.filter(hasBoth);
+    const reg = region.filter(hasBoth);
+    const nationalTotal = Math.max(1, nat.length);
+
+    const grid: WhitespaceGridCell[] = [];
+    for (const venueType of GRID_VENUES) {
+        for (let month = 1; month <= 12; month++) {
+            const nationalCount = nat.filter(
+                (r) => r.venueType === venueType && r.startMonth === month
+            ).length;
+            const regionCount = reg.filter(
+                (r) => r.venueType === venueType && r.startMonth === month
+            ).length;
+
+            const support = Math.min(1, nationalCount / SUPPORT_SATURATION);
+            const expected = reg.length * (nationalCount / nationalTotal);
+            const novelty =
+                expected <= 0 ? 0 : Math.min(1, Math.max(0, 1 - regionCount / expected));
+
+            grid.push({
+                venueType,
+                venueLabel: VENUE_TYPE_DISPLAY[venueType] ?? venueType,
+                month,
+                nationalCount,
+                regionCount,
+                // 전국 근거가 얇은 칸은 "기회"라고 부르지 않는다 - 아무도 안 한 이유가 있을 수 있다.
+                opportunityScore:
+                    nationalCount < MIN_NATIONAL_SUPPORT
+                        ? null
+                        : Number((support * novelty).toFixed(4)),
+            });
+        }
+    }
+
+    return { grid, coverage: { national: nat.length, region: reg.length } };
+}
+
 export interface WhitespaceInput {
     /** 전국 동일 유형 */
     national: PlannerRecord[];
@@ -99,7 +164,11 @@ export function analyzeWhitespace({ national, region }: WhitespaceInput): Whites
 
     const keywordOf = (r: PlannerRecord): string[] => r.keywords;
 
+    const { grid, coverage } = buildVenueMonthGrid(national, region);
+
     return {
+        venueMonthGrid: grid,
+        venueMonthCoverage: coverage,
         venue: scoreAxis(
             national.map(venueOf),
             region.map(venueOf),

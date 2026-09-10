@@ -26,6 +26,8 @@ import type {
     VisitorProfile,
 } from "@/lib/planner/types";
 import MonthChart from "./month-chart";
+import WhitespaceGrid from "./whitespace-grid";
+import BudgetScatter from "./budget-scatter";
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -489,6 +491,15 @@ export default function PlannerPage() {
                             ))}
                         </section>
 
+                        {/* 예산 포지셔닝 - 추천 카드의 1인당 투입비 기준선이 분포의 어디쯤인지 보여준다 */}
+                        <BudgetScatter
+                            budgetEfficiency={result.budgetEfficiency}
+                            datasetYearRange={result.datasetYearRange}
+                            regionSameTypeCount={result.cohort.regionSameType}
+                            regionLabel={regionLabel}
+                            typeLabel={typeLabel}
+                        />
+
                         {/* 방문자 구성 - 통신사 실측값. LLM 생성물이 아니다 */}
                         {visitorProfile && (
                             <MayoCard variant="outlined" padding="md">
@@ -589,6 +600,16 @@ export default function PlannerPage() {
                                 )}
                             </MayoCard>
                         )}
+
+                        {/* 화이트스페이스 지도 - 축별 표(아래)보다 먼저 두 축을 겹쳐 보여준다 */}
+                        <WhitespaceGrid
+                            whitespace={result.whitespace}
+                            venueType={venueType}
+                            targetMonth={startMonth === "" ? null : Number(startMonth)}
+                            datasetYearRange={result.datasetYearRange}
+                            regionLabel={regionLabel}
+                            typeLabel={typeLabel}
+                        />
 
                         {/* 화이트스페이스 상세 */}
                         <MayoCard variant="outlined" padding="md">

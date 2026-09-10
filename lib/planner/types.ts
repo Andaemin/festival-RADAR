@@ -97,6 +97,14 @@ export interface MonthDistributionEntry {
     sameTypeFestivalNames: string[];
 }
 
+/** 예산-방문객 산점도의 점 하나. 1인당 투입비가 계산된 축제만 실린다. */
+export interface BudgetScatterPoint {
+    festivalName: string;
+    totalBudgetKrw: number;
+    visitors: number;
+    costPerVisitorKrw: number;
+}
+
 export interface BudgetEfficiencySummary {
     /** 유사 코호트의 1인당 투입비 중앙값 */
     medianCostPerVisitorKrw: number | null;
@@ -104,8 +112,17 @@ export interface BudgetEfficiencySummary {
     p25CostPerVisitorKrw: number | null;
     p75CostPerVisitorKrw: number | null;
     sampleCount: number;
+    /**
+     * 통계를 낸 코호트가 지역인지 전국인지.
+     *
+     * 지역 표본이 얇으면 엔진이 전국으로 갈아탄다(./recommendation-engine.ts). 화면이
+     * 이 사실을 모르면 "세종 전통역사 319건"처럼 실제로 0건인 지역에 숫자를 붙이게 된다.
+     */
+    cohortScope: "REGION" | "NATIONAL";
     /** 저비용·고방문 상위 사례 */
     topEfficient: ReferenceFestival[];
+    /** 산점도용 표본. sampleCount가 상한을 넘으면 분포 모양을 유지한 채 솎아낸다. */
+    scatter: BudgetScatterPoint[];
 }
 
 export interface WhitespaceAxisEntry {
@@ -117,11 +134,31 @@ export interface WhitespaceAxisEntry {
     opportunityScore: number;
 }
 
+/**
+ * 장소 x 시기 격자 한 칸.
+ *
+ * 축을 하나씩 보면 "10월이 기회"까지만 알 수 있다. 두 축을 겹쳐야 "10월 x 수변형"처럼
+ * 바로 실행할 수 있는 조합이 나온다. 1D 집계와 같은 공식을 쓴다(./whitespace.ts).
+ */
+export interface WhitespaceGridCell {
+    venueType: string;
+    venueLabel: string;
+    month: number;
+    nationalCount: number;
+    regionCount: number;
+    /** 0~1. 전국 근거가 부족한 칸은 점수를 매기지 않고 null로 둔다. */
+    opportunityScore: number | null;
+}
+
 export interface WhitespaceReport {
     venue: WhitespaceAxisEntry[];
     month: WhitespaceAxisEntry[];
     keyword: WhitespaceAxisEntry[];
     durationBucket: WhitespaceAxisEntry[];
+    /** 장소(행) x 12개월(열) 격자. 장소·시기가 모두 기록된 축제만 센다. */
+    venueMonthGrid: WhitespaceGridCell[];
+    /** 격자 집계에 실제로 쓰인 건수. 원장에 장소 유형이 없는 연도가 있어 코호트보다 작다. */
+    venueMonthCoverage: { national: number; region: number };
 }
 
 export interface CohortSummary {
