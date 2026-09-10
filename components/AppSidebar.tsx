@@ -8,7 +8,6 @@ import ThemeToggle from "./ThemeToggle";
 const SIDEBAR_ITEMS: MayoSidebarItem[] = [
     { label: "메인", icon: "🏠", href: "/" },
     { label: "대시보드", icon: "📊", href: "/dashboard" },
-    { label: "축제 목록", icon: "🎪", href: "/festivals" },
     { label: "플래너", icon: "📝", href: "/planner" },
     {
         label: "분석",
