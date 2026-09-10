@@ -5,7 +5,6 @@ import {
     MayoSelect,
     MayoBtn,
     MayoCard,
-    MayoLoadingSpinner,
     MayoAlert,
     MayoTag,
     MayoBarChart,
@@ -172,17 +171,6 @@ interface ConcentrationItem {
     cnctrRate: string;
 }
 
-interface VisitorProfile {
-    regionLabel: string;
-    localVisitors: number;
-    outsiderVisitors: number;
-    foreignVisitors: number;
-    totalVisitors: number;
-    outsiderRatio: number;
-    nationalOutsiderRatio: number;
-    outsiderRatioRank: number;
-}
-
 function formatDate(ymd: string) {
     return `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
 }
@@ -200,12 +188,6 @@ function getDayLabel(ymd: string) {
     return days[d.getDay()];
 }
 
-function fmtNum(n: number): string {
-    if (n >= 1e8) return `${(n / 1e8).toFixed(1)}억`;
-    if (n >= 1e4) return `${(n / 1e4).toFixed(0)}만`;
-    return n.toLocaleString();
-}
-
 export default function ConcentrationPage() {
     const [areaCd, setAreaCd] = useState("");
     const [signguCd, setSignguCd] = useState("");
@@ -215,17 +197,6 @@ export default function ConcentrationPage() {
     const [error, setError] = useState<string | null>(null);
     const [allItems, setAllItems] = useState<ConcentrationItem[]>([]);
     const [totalCount, setTotalCount] = useState(0);
-
-    // visitor stats
-    const [visitorProfiles, setVisitorProfiles] = useState<VisitorProfile[]>([]);
-    const [visitorLoading, setVisitorLoading] = useState(false);
-    const [visitorError, setVisitorError] = useState<string | null>(null);
-    const [visitorMonth, setVisitorMonth] = useState(() => {
-        const now = new Date();
-        // default to 2 months ago (data may lag)
-        const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    });
 
     const districts = SIGNGU_CODES[areaCd] ?? [];
 
@@ -269,26 +240,6 @@ export default function ConcentrationPage() {
         } finally {
             cancelAnimationFrame(frame);
             setLoading(false);
-        }
-    }
-
-    async function handleVisitorFetch() {
-        const [yearStr, monthStr] = visitorMonth.split("-");
-        const year = Number(yearStr);
-        const month = Number(monthStr);
-        if (!year || !month) return;
-
-        setVisitorLoading(true);
-        setVisitorError(null);
-        try {
-            const res = await fetch(`/api/v1/visitor-stats?year=${year}&month=${month}`);
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.message ?? "조회 실패");
-            setVisitorProfiles(data.profiles ?? []);
-        } catch (e) {
-            setVisitorError(e instanceof Error ? e.message : "방문자 데이터 조회 실패");
-        } finally {
-            setVisitorLoading(false);
         }
     }
 
@@ -366,37 +317,8 @@ export default function ConcentrationPage() {
         }));
     }, [attractionAvg]);
 
-    // visitor chart data
-    const visitorBarData = useMemo(() => {
-        if (!visitorProfiles.length) return [];
-        return [...visitorProfiles]
-            .sort((a, b) => b.totalVisitors - a.totalVisitors)
-            .map((p) => ({
-                label: p.regionLabel,
-                총방문자: Math.round(p.totalVisitors / 1e4),
-                외지인: Math.round(p.outsiderVisitors / 1e4),
-                외국인: Math.round(p.foreignVisitors / 1e4),
-            }));
-    }, [visitorProfiles]);
-
-    const outsiderRatioData = useMemo(() => {
-        if (!visitorProfiles.length) return [];
-        return [...visitorProfiles]
-            .sort((a, b) => b.outsiderRatio - a.outsiderRatio)
-            .map((p) => ({
-                label: p.regionLabel,
-                외지인비율: Math.round(p.outsiderRatio * 1000) / 10,
-            }));
-    }, [visitorProfiles]);
-
     const selectedAreaName = AREA_CODES.find((a) => a.code === areaCd)?.name ?? "";
     const selectedSignguName = districts.find((d) => d.code === signguCd)?.name ?? "";
-
-    // highlight the selected area in visitor data
-    const selectedAreaProfile = useMemo(() => {
-        if (!visitorProfiles.length || !selectedAreaName) return null;
-        return visitorProfiles.find((p) => selectedAreaName.startsWith(p.regionLabel) || p.regionLabel.startsWith(selectedAreaName.slice(0, 2)));
-    }, [visitorProfiles, selectedAreaName]);
 
     return (
         <main className="min-h-screen flex flex-col p-4 lg:p-5 gap-4" style={{ background: "var(--mayo-bg-subtle)" }}>
@@ -618,173 +540,12 @@ export default function ConcentrationPage() {
                 </>
             )}
 
-            {/* ───── 지역별 관광 수요 강도 ───── */}
-            <MayoDivider />
-            <section>
-                <h2 className="text-lg font-bold mb-1" style={{ color: "var(--mayo-text)" }}>
-                    지역별 관광 수요 강도
-                </h2>
-                <p className="text-xs mb-3" style={{ color: "var(--mayo-text-muted)" }}>
-                    이동통신 기반 광역시도별 방문자 수 및 외지인 비율 비교
-                </p>
-
-                <div className="flex items-end gap-3 mb-4" style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", borderRadius: 8, padding: "10px 14px" }}>
-                    <div className="flex-1 max-w-xs">
-                        <label className="text-xs font-medium block mb-1" style={{ color: "var(--mayo-text-muted)" }}>조회 월</label>
-                        <input
-                            type="month"
-                            value={visitorMonth}
-                            onChange={(e) => setVisitorMonth(e.target.value)}
-                            className="w-full rounded border px-2 py-1 text-sm"
-                            style={{ background: "var(--mayo-bg)", color: "var(--mayo-text)", borderColor: "var(--mayo-border)" }}
-                        />
-                    </div>
-                    <MayoBtn
-                        variant="primary"
-                        size="sm"
-                        color="green"
-                        onClick={handleVisitorFetch}
-                        disabled={visitorLoading}
-                    >
-                        {visitorLoading ? "불러오는 중..." : "방문자 데이터 조회"}
-                    </MayoBtn>
-                </div>
-
-                {visitorLoading && (
-                    <div className="flex justify-center py-8">
-                        <MayoLoadingSpinner size="md" color="green" label="방문자 데이터를 불러오는 중..." />
-                    </div>
-                )}
-
-                {visitorError && <MayoAlert type="error" title="방문자 데이터 오류">{visitorError}</MayoAlert>}
-
-                {!visitorLoading && visitorProfiles.length > 0 && (
-                    <>
-                        {/* 선택 지역 하이라이트 */}
-                        {selectedAreaProfile && (
-                            <div className="flex items-center gap-2 flex-wrap mb-3">
-                                <MayoTag color="green" variant="solid" size="sm">{selectedAreaProfile.regionLabel}</MayoTag>
-                                <MayoTag color="blue" variant="soft" size="sm">
-                                    총 방문자 {fmtNum(selectedAreaProfile.totalVisitors)}명
-                                </MayoTag>
-                                <MayoTag color="purple" variant="soft" size="sm">
-                                    외지인 비율 {(selectedAreaProfile.outsiderRatio * 100).toFixed(1)}%
-                                </MayoTag>
-                                <MayoTag color="gray" variant="soft" size="sm">
-                                    전국 {selectedAreaProfile.outsiderRatioRank}위 / 17개 시도
-                                </MayoTag>
-                            </div>
-                        )}
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            {/* 총 방문자 수 비교 */}
-                            <MayoCard variant="outlined" padding="md">
-                                <MayoBarChart
-                                    title="시도별 방문자 수 (만명)"
-                                    data={visitorBarData}
-                                    series={[
-                                        { key: "외지인", color: "#8b5cf6", label: "외지인(만)" },
-                                        { key: "외국인", color: "#f97316", label: "외국인(만)" },
-                                        { key: "총방문자", color: "#2e8af2", label: "총방문자(만)" },
-                                    ]}
-                                    height={340}
-                                    showGrid
-                                    showLegend
-                                />
-                            </MayoCard>
-
-                            {/* 외지인 비율 비교 */}
-                            <MayoCard variant="outlined" padding="md">
-                                <MayoBarChart
-                                    title="시도별 외지인 비율 (%)"
-                                    data={outsiderRatioData}
-                                    series={[
-                                        { key: "외지인비율", color: "#10b981", label: "외지인 비율(%)" },
-                                    ]}
-                                    height={340}
-                                    showGrid
-                                    showLegend
-                                />
-                            </MayoCard>
-                        </div>
-
-                        {/* 방문자 상세 테이블 */}
-                        <MayoCard variant="outlined" padding="md" className="mt-4">
-                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
-                                시도별 방문자 상세
-                            </p>
-                            <MayoTable
-                                columns={[
-                                    { key: "regionLabel", label: "시도", sortable: true },
-                                    {
-                                        key: "totalVisitors",
-                                        label: "총 방문자",
-                                        sortable: true,
-                                        render: (v: unknown) => fmtNum(Number(v)),
-                                    },
-                                    {
-                                        key: "localVisitors",
-                                        label: "현지인",
-                                        sortable: true,
-                                        render: (v: unknown) => fmtNum(Number(v)),
-                                    },
-                                    {
-                                        key: "outsiderVisitors",
-                                        label: "외지인",
-                                        sortable: true,
-                                        render: (v: unknown) => fmtNum(Number(v)),
-                                    },
-                                    {
-                                        key: "foreignVisitors",
-                                        label: "외국인",
-                                        sortable: true,
-                                        render: (v: unknown) => fmtNum(Number(v)),
-                                    },
-                                    {
-                                        key: "outsiderRatio",
-                                        label: "외지인 비율",
-                                        width: 130,
-                                        sortable: true,
-                                        render: (v: unknown) => {
-                                            const n = Number(v);
-                                            const pct = (n * 100).toFixed(1);
-                                            const color = n > 0.5 ? "purple" : n > 0.3 ? "blue" : "gray";
-                                            return (
-                                                <div className="flex items-center gap-1">
-                                                    <span>{pct}%</span>
-                                                    <MayoTag color={color as "purple" | "blue" | "gray"} variant="soft" size="sm">
-                                                        {n > 0.5 ? "높음" : n > 0.3 ? "보통" : "낮음"}
-                                                    </MayoTag>
-                                                </div>
-                                            );
-                                        },
-                                    },
-                                    {
-                                        key: "outsiderRatioRank",
-                                        label: "순위",
-                                        width: 70,
-                                        sortable: true,
-                                    },
-                                ]}
-                                data={
-                                    [...visitorProfiles]
-                                        .sort((a, b) => a.outsiderRatioRank - b.outsiderRatioRank) as unknown as Record<string, unknown>[]
-                                }
-                                rowKey="regionLabel"
-                                striped
-                                bordered
-                            />
-                        </MayoCard>
-                    </>
-                )}
-            </section>
 
             {/* 검색 전 안내 */}
             {!loading && allItems.length === 0 && !error && (
                 <MayoAlert type="info" title="사용 방법">
                     시도와 시군구를 선택한 뒤 &quot;관광지 불러오기&quot; 버튼을 눌러주세요.
                     관광지 목록에서 원하는 관광지를 선택하면 집중률 분석 결과를 확인할 수 있습니다.
-                    하단의 &quot;방문자 데이터 조회&quot;를 통해 지역별 관광 수요도 함께 비교할 수 있습니다.
                 </MayoAlert>
             )}
         </main>

@@ -21,7 +21,7 @@ export default function HomePage() {
                     className="text-xs mb-8 inline-block rounded-md px-2.5 py-1"
                     style={{ background: "var(--mayo-surface)", border: "1px solid var(--mayo-border)", color: "var(--mayo-text-secondary)" }}
                 >
-                    2025 한국관광콘텐츠랩 공모전 출품작
+                    2026 한국관광콘텐츠랩 공모전 출품작
                 </p>
                 <nav className="flex flex-col gap-3">
                     {pages.map((p) => (
@@ -44,6 +44,12 @@ export default function HomePage() {
                         </Link>
                     ))}
                 </nav>
+
+                <footer className="mt-12 text-center text-xs leading-relaxed" style={{ color: "var(--mayo-text-muted)" }}>
+                    <p>본 서비스는 2026 한국관광콘텐츠랩 공모전 출품용 테스트 작품입니다.</p>
+                    <p className="mt-1">시연 및 평가 목적으로 제작되었으며, 한국관광공사 제공 API를 활용하였습니다.</p>
+                    <p className="mt-2" style={{ color: "var(--mayo-text-muted)", opacity: 0.6 }}>© 2026 Festival Radar Team</p>
+                </footer>
             </div>
         </main>
     );
