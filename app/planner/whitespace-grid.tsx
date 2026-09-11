@@ -88,7 +88,7 @@ export default function WhitespaceGrid({
                     </div>
                 )}
 
-                <table style={{ borderSpacing: 3, borderCollapse: "separate", width: "100%" }}>
+                <table className="mx-auto" style={{ borderSpacing: 3, borderCollapse: "separate" }}>
                     <thead>
                         <tr>
                             <th style={{ width: 56 }} />
@@ -98,7 +98,7 @@ export default function WhitespaceGrid({
                                     <th
                                         key={m}
                                         className={`text-[11px] pb-1 text-center ${lit ? "font-bold" : "font-normal"}`}
-                                        style={{ color: lit ? "var(--mayo-text)" : "var(--mayo-text-muted)" }}
+                                        style={{ color: lit ? "var(--mayo-text)" : "var(--mayo-text-muted)", width: 30 }}
                                     >
                                         {m}월
                                     </th>

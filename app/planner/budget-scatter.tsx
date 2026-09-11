@@ -158,7 +158,7 @@ export default function BudgetScatter({
                     </div>
                 )}
 
-                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="예산 대비 방문객 분포">
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 280 }} role="img" aria-label="예산 대비 방문객 분포">
                     {/* Y축 그리드 */}
                     {powerTicks(yMin, yMax).map((t) => (
                         <g key={`y${t}`}>
