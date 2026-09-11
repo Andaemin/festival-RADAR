@@ -77,8 +77,20 @@ function scoreAxis(
     );
 }
 
-/** 격자에 세울 장소 유형. "미정"은 기획 선택지가 아니라 제외한다. */
-const GRID_VENUES: VenueType[] = Object.values(VenueType).filter((v) => v !== VenueType.UNDECIDED);
+/**
+ * 기획 선택지가 되는 장소 유형인가.
+ *
+ * "미정"은 아직 안 정한 것이고 "기타"는 4개 분류에 안 들어간 것이라, 둘 다 **골라서 갈 수
+ * 있는 장소가 아니다.** 그런데 "기타"는 전국 사례가 많고 지역엔 드문 경우가 흔해서 그대로
+ * 두면 기회점수 1위로 올라온다 - 실측 85개 조합 중 27건에서 "장소를 기타으로 바꿔보세요"가
+ * 떴다. 장소 축·격자·근거 표본 어디서든 이 함수 하나로 거른다.
+ */
+function isPlannableVenue(v: VenueType | null): v is VenueType {
+    return v !== null && v !== VenueType.UNDECIDED && v !== VenueType.OTHER;
+}
+
+/** 격자에 세울 장소 유형. */
+const GRID_VENUES: VenueType[] = Object.values(VenueType).filter(isPlannableVenue);
 
 /**
  * 장소 x 시기 격자.
@@ -103,7 +115,7 @@ function buildVenueMonthGrid(
     region: PlannerRecord[]
 ): { grid: WhitespaceGridCell[]; coverage: { national: number; region: number } } {
     const hasBoth = (r: PlannerRecord): boolean =>
-        r.venueType !== null && r.venueType !== VenueType.UNDECIDED && r.startMonth !== null;
+        isPlannableVenue(r.venueType) && r.startMonth !== null;
 
     const nat = national.filter(hasBoth);
     const reg = region.filter(hasBoth);
@@ -150,9 +162,8 @@ export interface WhitespaceInput {
 }
 
 export function analyzeWhitespace({ national, region }: WhitespaceInput): WhitespaceReport {
-    // 장소: UNDECIDED("미정")는 기획 선택지가 아니므로 제외한다.
-    const venueOf = (r: PlannerRecord): string[] =>
-        r.venueType && r.venueType !== VenueType.UNDECIDED ? [r.venueType] : [];
+    // 장소: "미정"·"기타"는 기획 선택지가 아니므로 제외한다(isPlannableVenue 참고).
+    const venueOf = (r: PlannerRecord): string[] => (isPlannableVenue(r.venueType) ? [r.venueType] : []);
 
     const monthOf = (r: PlannerRecord): string[] =>
         r.startMonth !== null ? [String(r.startMonth)] : [];

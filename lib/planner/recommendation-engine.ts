@@ -123,6 +123,8 @@ export function generateRecommendations({ request, all, datasetYearRange, climat
         recommendations.push({
             id: `venue-${venueCandidate.value}`,
             kind: "VENUE_SHIFT",
+            // 후보는 마을형·녹지형·수변형·독립형뿐이라(./whitespace.ts isPlannableVenue) 모두 받침이
+            // 있어 "으로"가 맞다. 받침 없는 장소 유형이 생기면 조사를 함께 손봐야 한다.
             title: `장소를 ${venueCandidate.label}으로 바꿔보세요`,
             summary: `${corpusScope} 전국 ${typeLabel} 축제 중 ${venueCandidate.nationalCount}건이 ${venueCandidate.label} 장소에서 열렸지만, ${regionLabel}의 ${typeLabel} 축제 중에는 ${venueCandidate.regionCount}건뿐입니다.`,
             rationale: [
