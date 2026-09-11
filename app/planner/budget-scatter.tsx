@@ -1,35 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { MayoCard } from "mayoui-react";
+import { MayoCard, MayoTag, MayoAccordion, MayoTable, MayoDivider } from "mayoui-react";
 import type { BudgetEfficiencySummary, BudgetScatterPoint } from "@/lib/planner/types";
-
-/**
- * 예산-방문객 포지셔닝 맵.
- *
- * "1인당 투입비 9,539원"이라는 한 줄로는 그 값이 후한지 빠듯한지 알 수 없다.
- * 같은 코호트를 흩뿌려 놓으면 중앙값이 분포의 어디쯤인지, 우리 계획이 어느
- * 쪽에 서게 되는지가 한눈에 보인다.
- *
- * **두 축 모두 로그다.** 예산은 500만원부터 수십억까지 3자릿수 넘게 벌어져
- * 선형 축에서는 점의 90%가 왼쪽 끝에 뭉친다. 로그로 두면 1인당 투입비가 같은
- * 축제들이 직선 위에 놓여, 중앙값선이 곧은 대각선이 된다.
- *
- * 툴팁은 month-chart와 같은 모양이되 위치만 점을 따라간다 - 점이 흩어져 있어
- * 고정 위치에 띄우면 어느 점을 말하는지 알 수 없다.
- */
 
 const POINT = "#2a78d6";
 const MEDIAN_LINE = "#25b366";
-
-const W = 420;
-const H = 260;
-const PAD = { top: 14, right: 14, bottom: 30, left: 46 };
-
-/** 점이 이보다 적으면 분포라고 부를 수 없어 카드를 통째로 숨긴다. */
 const MIN_POINTS = 8;
 
-/** 원 단위를 축 눈금용으로 줄인다. */
+// viewBox 기준 좌표 — 실제 렌더링은 w-full로 반응형
+const W = 600;
+const H = 320;
+const PAD = { top: 16, right: 16, bottom: 36, left: 52 };
+
+function krw(value: number): string {
+    if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}억원`;
+    if (value >= 10_000) return `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원`;
+    return `${value.toLocaleString("ko-KR")}원`;
+}
+
 function krwTick(value: number): string {
     if (value >= 100_000_000) return `${value / 100_000_000}억`;
     if (value >= 10_000_000) return `${value / 10_000_000}천만`;
@@ -43,7 +32,6 @@ function personTick(value: number): string {
     return `${value}`;
 }
 
-/** 10의 거듭제곱 눈금만 쓴다. 로그축에서 간격이 일정해 읽기 쉽다. */
 function powerTicks(min: number, max: number): number[] {
     const ticks: number[] = [];
     for (let e = Math.floor(Math.log10(min)); e <= Math.ceil(Math.log10(max)); e++) {
@@ -53,17 +41,18 @@ function powerTicks(min: number, max: number): number[] {
     return ticks;
 }
 
-function krwFull(value: number): string {
-    if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}억원`;
-    if (value >= 10_000) return `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원`;
-    return `${value.toLocaleString("ko-KR")}원`;
+function efficiencyGrade(cost: number, median: number): { label: string; color: "green" | "blue" | "purple" | "orange" | "red" } {
+    const ratio = cost / median;
+    if (ratio <= 0.5) return { label: "매우 효율적", color: "green" };
+    if (ratio <= 0.8) return { label: "효율적", color: "blue" };
+    if (ratio <= 1.2) return { label: "평균", color: "purple" };
+    if (ratio <= 1.8) return { label: "높은 편", color: "orange" };
+    return { label: "매우 높음", color: "red" };
 }
 
 interface Props {
     budgetEfficiency: BudgetEfficiencySummary;
-    /** 코퍼스가 포괄하는 연도 [최소, 최대]. 집계 조건 문구에 그대로 적는다. */
     datasetYearRange: [number, number];
-    /** 지역 동일유형 축제 수. 전국으로 갈아탄 이유를 설명하는 데만 쓴다. */
     regionSameTypeCount: number;
     regionLabel: string;
     typeLabel: string;
@@ -88,6 +77,8 @@ export default function BudgetScatter({
 
     if (scatter.length < MIN_POINTS || median === null) return null;
 
+    const scopeLabel = cohortScope === "REGION" ? `${regionLabel} ${typeLabel}` : `전국 ${typeLabel}`;
+
     const budgets = scatter.map((p) => p.totalBudgetKrw);
     const visitors = scatter.map((p) => p.visitors);
     const xMin = Math.min(...budgets);
@@ -101,49 +92,43 @@ export default function BudgetScatter({
     const lx = (v: number) => PAD.left + ((Math.log10(v) - Math.log10(xMin)) / xSpan) * (W - PAD.left - PAD.right);
     const ly = (v: number) => H - PAD.bottom - ((Math.log10(v) - Math.log10(yMin)) / ySpan) * (H - PAD.top - PAD.bottom);
 
-    /** 1인당 투입비가 c원으로 일정한 축제들이 놓이는 선(visitors = budget / c). */
     const cpvLine = (c: number) => {
         const clamp = (v: number) => Math.min(yMax, Math.max(yMin, v));
         return { x1: lx(xMin), y1: ly(clamp(xMin / c)), x2: lx(xMax), y2: ly(clamp(xMax / c)) };
     };
 
     const mid = cpvLine(median);
-
-    /** 중앙값 대비 몇 % 저렴한가. 음수면 더 비싸다. */
     const gapPct = hovered === null ? 0 : Math.round(((median - hovered.costPerVisitorKrw) / median) * 100);
+
+    // 테이블 데이터
+    const tableData = [...scatter]
+        .sort((a, b) => a.costPerVisitorKrw - b.costPerVisitorKrw)
+        .map((p, i) => ({
+            rank: i + 1,
+            festivalName: p.festivalName,
+            totalBudgetKrw: p.totalBudgetKrw,
+            visitors: p.visitors,
+            costPerVisitorKrw: p.costPerVisitorKrw,
+        }));
 
     return (
         <MayoCard variant="outlined" padding="md">
             <h2 className="text-base font-bold mb-1" style={{ color: "var(--mayo-text)" }}>
                 예산 · 방문객 포지셔닝
             </h2>
-            <p className="text-xs mb-3" style={{ color: "var(--mayo-text-muted)" }}>
-                점 하나가 축제 하나입니다. 초록선 위쪽은 같은 예산으로 더 많이 모은 축제이며, 점에 마우스를
-                올리면 축제명이 나옵니다.
+            <p className="text-xs mb-1" style={{ color: "var(--mayo-text-muted)" }}>
+                {scopeLabel} {sampleCount}건 · {datasetYearRange[0]}~{datasetYearRange[1]}년
+                {cohortScope === "NATIONAL" && ` · ${regionLabel} ${regionSameTypeCount}건 → 전국 확대`}
             </p>
 
-            {/* 지역 표본이 얇으면 엔진이 전국으로 갈아탄다. 그 사실을 반드시 밝힌다. */}
-            <div
-                className="text-[11px] rounded px-2.5 py-2 mb-4 flex flex-col gap-0.5"
-                style={{ background: "var(--mayo-bg-subtle)", color: "var(--mayo-text-muted)" }}
-            >
-                <div>
-                    <strong style={{ color: "var(--mayo-text-secondary)" }}>집계 조건</strong>{" "}
-                    {datasetYearRange[0]}~{datasetYearRange[1]}년 · {typeLabel} · 예산과 방문객이 모두 기록된
-                    축제만(방문객 1,000명 이상)
-                </div>
-                <div>
-                    <strong style={{ color: "var(--mayo-text-secondary)" }}>표본</strong>{" "}
-                    {cohortScope === "REGION" ? `${regionLabel} ${typeLabel}` : `전국 ${typeLabel}`} {sampleCount}건
-                    {scatter.length < sampleCount ? ` 중 ${scatter.length}건 표시` : ""}
-                </div>
-                {cohortScope === "NATIONAL" && (
-                    <div style={{ color: "var(--mayo-text-secondary)" }}>
-                        {regionLabel}에는 {typeLabel} 축제가 {regionSameTypeCount}건뿐이라 전국 기준으로 비교합니다.
-                    </div>
-                )}
+            {/* 요약 지표 */}
+            <div className="flex flex-wrap gap-3 mb-3 text-xs" style={{ color: "var(--mayo-text-muted)" }}>
+                <span>중앙값 <strong style={{ color: "#25b366" }}>{krw(median)}</strong>/인</span>
+                {p25 !== null && <span>Q1 <strong>{krw(p25)}</strong></span>}
+                {p75 !== null && <span>Q3 <strong>{krw(p75)}</strong></span>}
             </div>
 
+            {/* 산점도 */}
             <div className="relative">
                 {hovered && (
                     <div
@@ -154,141 +139,126 @@ export default function BudgetScatter({
                             boxShadow: "var(--mayo-shadow-md)",
                             left: `${(lx(hovered.totalBudgetKrw) / W) * 100}%`,
                             top: `${(ly(hovered.visitors) / H) * 100}%`,
-                            // 점 위쪽에 띄우되, 위가 좁으면 아래로 뒤집는다.
-                            transform:
-                                ly(hovered.visitors) < H * 0.42
-                                    ? "translate(-50%, 12px)"
-                                    : "translate(-50%, calc(-100% - 12px))",
+                            transform: ly(hovered.visitors) < H * 0.4
+                                ? "translate(-50%, 10px)"
+                                : "translate(-50%, calc(-100% - 10px))",
                         }}
                     >
-                        <div className="font-bold mb-1">{hovered.festivalName}</div>
-                        <div>예산 {krwFull(hovered.totalBudgetKrw)}</div>
-                        <div>방문객 {hovered.visitors.toLocaleString("ko-KR")}명</div>
+                        <div className="font-bold mb-0.5">{hovered.festivalName}</div>
+                        <div>예산 {krw(hovered.totalBudgetKrw)} · 방문객 {hovered.visitors.toLocaleString("ko-KR")}명</div>
                         <div
-                            className="mt-1.5 pt-1.5"
+                            className="mt-1 pt-1"
                             style={{ borderTop: "1px solid var(--mayo-border)" }}
                         >
-                            1인당 {hovered.costPerVisitorKrw.toLocaleString("ko-KR")}원
+                            1인당 {krw(hovered.costPerVisitorKrw)}
                             <span style={{ color: "var(--mayo-text-muted)" }}>
-                                {" "}
-                                · 중앙값보다 {Math.abs(gapPct)}% {gapPct >= 0 ? "낮음" : "높음"}
+                                {" · "}중앙값보다 {Math.abs(gapPct)}% {gapPct >= 0 ? "낮음" : "높음"}
                             </span>
                         </div>
                     </div>
                 )}
 
                 <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="예산 대비 방문객 분포">
+                    {/* Y축 그리드 */}
                     {powerTicks(yMin, yMax).map((t) => (
                         <g key={`y${t}`}>
-                            <line
-                                x1={PAD.left}
-                                y1={ly(t)}
-                                x2={W - PAD.right}
-                                y2={ly(t)}
-                                stroke="var(--mayo-border)"
-                                strokeWidth={1}
-                            />
-                            <text
-                                x={PAD.left - 6}
-                                y={ly(t) + 3}
-                                textAnchor="end"
-                                fontSize={9}
-                                fill="var(--mayo-text-muted)"
-                            >
-                                {personTick(t)}
-                            </text>
+                            <line x1={PAD.left} y1={ly(t)} x2={W - PAD.right} y2={ly(t)} stroke="var(--mayo-border)" strokeWidth={0.5} />
+                            <text x={PAD.left - 6} y={ly(t) + 3} textAnchor="end" fontSize={8} fill="var(--mayo-text-muted)">{personTick(t)}</text>
                         </g>
                     ))}
+                    {/* X축 라벨 */}
                     {powerTicks(xMin, xMax).map((t) => (
-                        <text
-                            key={`x${t}`}
-                            x={lx(t)}
-                            y={H - PAD.bottom + 13}
-                            textAnchor="middle"
-                            fontSize={9}
-                            fill="var(--mayo-text-muted)"
-                        >
-                            {krwTick(t)}
-                        </text>
+                        <text key={`x${t}`} x={lx(t)} y={H - PAD.bottom + 14} textAnchor="middle" fontSize={8} fill="var(--mayo-text-muted)">{krwTick(t)}</text>
                     ))}
 
+                    {/* IQR 대각선 */}
                     {[p25, p75].map((c) =>
                         c === null ? null : (
-                            <line
-                                key={c}
-                                {...cpvLine(c)}
-                                stroke={MEDIAN_LINE}
-                                strokeWidth={1}
-                                strokeDasharray="3 3"
-                                opacity={0.45}
-                            />
+                            <line key={c} {...cpvLine(c)} stroke={MEDIAN_LINE} strokeWidth={0.5} strokeDasharray="4 3" opacity={0.4} />
                         )
                     )}
-                    <line x1={mid.x1} y1={mid.y1} x2={mid.x2} y2={mid.y2} stroke={MEDIAN_LINE} strokeWidth={1.5} />
+                    {/* 중앙값 대각선 */}
+                    <line {...mid} stroke={MEDIAN_LINE} strokeWidth={1} />
 
+                    {/* 점 */}
                     {scatter.map((p) => {
-                        const isHovered = hovered === p;
+                        const isH = hovered === p;
                         return (
                             <circle
-                                key={`${p.festivalName}-${p.totalBudgetKrw}-${p.visitors}`}
+                                key={`${p.festivalName}-${p.totalBudgetKrw}`}
                                 cx={lx(p.totalBudgetKrw)}
                                 cy={ly(p.visitors)}
-                                r={isHovered ? 5 : 2.6}
+                                r={isH ? 4 : 2.2}
                                 fill={POINT}
-                                stroke={isHovered ? "var(--mayo-surface)" : "none"}
-                                strokeWidth={isHovered ? 1.5 : 0}
-                                opacity={hovered === null ? 0.55 : isHovered ? 1 : 0.18}
+                                stroke={isH ? "var(--mayo-surface)" : "none"}
+                                strokeWidth={isH ? 1.5 : 0}
+                                opacity={hovered === null ? 0.5 : isH ? 1 : 0.15}
                                 style={{ transition: "opacity 120ms" }}
                             />
                         );
                     })}
-
-                    {/* 점이 작아 그대로는 잡기 어렵다. 보이지 않는 넓은 원을 겹쳐 판정만 맡긴다. */}
+                    {/* 투명 히트 영역 */}
                     {scatter.map((p) => (
                         <circle
-                            key={`hit-${p.festivalName}-${p.totalBudgetKrw}-${p.visitors}`}
+                            key={`hit-${p.festivalName}-${p.totalBudgetKrw}`}
                             cx={lx(p.totalBudgetKrw)}
                             cy={ly(p.visitors)}
-                            r={7}
+                            r={8}
                             fill="transparent"
                             onMouseEnter={() => setHovered(p)}
                             onMouseLeave={() => setHovered(null)}
                         />
                     ))}
 
-                    <text x={W - PAD.right} y={H - 3} textAnchor="end" fontSize={9} fill="var(--mayo-text-muted)">
-                        총예산 →
-                    </text>
-                    <text x={2} y={PAD.top - 4} fontSize={9} fill="var(--mayo-text-muted)">
-                        방문객 ↑
-                    </text>
+                    <text x={W - PAD.right} y={H - 4} textAnchor="end" fontSize={8} fill="var(--mayo-text-muted)">총예산 →</text>
+                    <text x={2} y={PAD.top - 4} fontSize={8} fill="var(--mayo-text-muted)">방문객 ↑</text>
                 </svg>
             </div>
 
-            <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-xs" style={{ color: "var(--mayo-text-muted)" }}>
-                <span className="flex items-center gap-1.5">
-                    <svg width="18" height="6" aria-hidden>
-                        <line x1="0" y1="3" x2="18" y2="3" stroke={MEDIAN_LINE} strokeWidth="1.5" />
-                    </svg>
-                    1인당 {median.toLocaleString("ko-KR")}원 (중앙값)
+            {/* 범례 */}
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
+                <span className="flex items-center gap-1">
+                    <svg width="16" height="5" aria-hidden><line x1="0" y1="2.5" x2="16" y2="2.5" stroke={MEDIAN_LINE} strokeWidth="1" /></svg>
+                    중앙값
                 </span>
-                {p25 !== null && p75 !== null && (
-                    <span className="flex items-center gap-1.5">
-                        <svg width="18" height="6" aria-hidden>
-                            <line
-                                x1="0"
-                                y1="3"
-                                x2="18"
-                                y2="3"
-                                stroke={MEDIAN_LINE}
-                                strokeWidth="1"
-                                strokeDasharray="3 3"
-                                opacity="0.45"
+                <span className="flex items-center gap-1">
+                    <svg width="16" height="5" aria-hidden><line x1="0" y1="2.5" x2="16" y2="2.5" stroke={MEDIAN_LINE} strokeWidth="0.5" strokeDasharray="4 3" opacity="0.4" /></svg>
+                    Q1·Q3
+                </span>
+                <span>초록선 위 = 같은 예산으로 더 많이 모은 축제</span>
+            </div>
+
+            {/* 상세 테이블 드롭다운 */}
+            <div className="mt-3">
+                <MayoAccordion
+                    bordered
+                    items={[{
+                        value: "table",
+                        label: `축제별 예산 효율 상세 (${scatter.length}건)`,
+                        children: (
+                            <MayoTable
+                                columns={[
+                                    { key: "rank", label: "#", width: 30 },
+                                    { key: "festivalName", label: "축제명", sortable: true },
+                                    { key: "totalBudgetKrw", label: "예산", width: 80, sortable: true, render: (v: unknown) => krw(Number(v)) },
+                                    { key: "visitors", label: "방문객", width: 80, sortable: true, render: (v: unknown) => { const n = Number(v); return n >= 10000 ? `${Math.round(n / 10000).toLocaleString()}만명` : `${n.toLocaleString()}명`; } },
+                                    {
+                                        key: "costPerVisitorKrw", label: "1인당", width: 110, sortable: true,
+                                        render: (v: unknown) => {
+                                            const n = Number(v);
+                                            const grade = efficiencyGrade(n, median);
+                                            return (<div className="flex items-center gap-1"><span>{krw(n)}</span><MayoTag color={grade.color} variant="soft" size="sm">{grade.label}</MayoTag></div>);
+                                        },
+                                    },
+                                ]}
+                                data={tableData as unknown as Record<string, unknown>[]}
+                                rowKey="rank"
+                                bordered
+                                striped
                             />
-                        </svg>
-                        하위 25% {p25.toLocaleString("ko-KR")}원 · 상위 25% {p75.toLocaleString("ko-KR")}원
-                    </span>
-                )}
+                        ),
+                    }]}
+                />
             </div>
         </MayoCard>
     );

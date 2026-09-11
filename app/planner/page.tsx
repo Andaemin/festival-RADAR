@@ -530,45 +530,52 @@ export default function PlannerPage() {
                             </p>
                         )}
 
-                        <div className="flex flex-col gap-3">
-                            {result.recommendations.map((rec) => (
-                                <MayoCard key={rec.id} variant="outlined" padding="md">
-                                    {/* 모바일: 세로 배치, 데스크톱: 가로 배치 */}
-                                    <div className="flex flex-col sm:flex-row gap-3">
-                                        {/* 기회 점수 */}
+                        <MayoAccordion
+                            multiple
+                            bordered
+                            items={result.recommendations.map((rec) => ({
+                                value: rec.id,
+                                label: (
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         {rec.kind !== "BUDGET_EFFICIENCY" && (
-                                            <div className="flex sm:flex-col items-center gap-2 sm:gap-1 rounded-lg px-3 py-2 shrink-0 sm:min-w-[72px]" style={{ background: "var(--mayo-bg-subtle)" }}>
-                                                <span className="text-2xl font-bold" style={{ color: "var(--mayo-text)" }}>{rec.opportunityScore}</span>
-                                                <MayoTag color={scoreColor(rec.opportunityScore)} variant="soft" size="sm">{scoreLabel(rec.opportunityScore)}</MayoTag>
-                                                <span className="text-[10px] hidden sm:block" style={{ color: "var(--mayo-text-muted)" }}>기회 점수</span>
-                                            </div>
+                                            <span className="text-base font-bold" style={{ color: "var(--mayo-text)" }}>{rec.opportunityScore}</span>
                                         )}
-
-                                        {/* 내용 */}
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                <MayoTag color={KIND_TAG_COLOR[rec.kind]} variant="solid" size="sm">{KIND_LABEL[rec.kind]}</MayoTag>
-                                            </div>
-                                            <h3 className="font-bold text-sm" style={{ color: "var(--mayo-text)" }}>{rec.title}</h3>
-                                            <p className="text-xs sm:text-sm mt-1" style={{ color: "var(--mayo-text-muted)" }}>{rec.summary}</p>
-
-                                            {rec.rationale.length > 0 && (
-                                                <ul className="mt-2 text-xs flex flex-col gap-0.5" style={{ color: "var(--mayo-text-muted)" }}>
-                                                    {rec.rationale.map((line, i) => (
-                                                        <li key={i}>· {line}</li>
-                                                    ))}
-                                                </ul>
-                                            )}
-
-                                            <ReferenceTable items={rec.referenceFestivals} venues={festivalVenues} />
-                                        </div>
+                                        <MayoTag color={KIND_TAG_COLOR[rec.kind]} variant="solid" size="sm">{KIND_LABEL[rec.kind]}</MayoTag>
+                                        <span className="font-semibold text-sm" style={{ color: "var(--mayo-text)" }}>{rec.title}</span>
+                                        {rec.kind !== "BUDGET_EFFICIENCY" && (
+                                            <MayoTag color={scoreColor(rec.opportunityScore)} variant="soft" size="sm">{scoreLabel(rec.opportunityScore)}</MayoTag>
+                                        )}
                                     </div>
-                                </MayoCard>
-                            ))}
-                        </div>
+                                ) as unknown as string,
+                                children: (
+                                    <div className="flex flex-col gap-2">
+                                        <p className="text-sm" style={{ color: "var(--mayo-text-muted)" }}>{rec.summary}</p>
+                                        {rec.rationale.length > 0 && (
+                                            <ul className="text-xs flex flex-col gap-0.5" style={{ color: "var(--mayo-text-muted)" }}>
+                                                {rec.rationale.map((line, i) => (
+                                                    <li key={i}>· {line}</li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                        <ReferenceTable items={rec.referenceFestivals} venues={festivalVenues} />
+                                    </div>
+                                ),
+                            }))}
+                        />
                     </section>
 
-                    {/* 예산 포지셔닝 - 추천 카드의 1인당 투입비 기준선이 분포의 어디쯤인지 보여준다 */}
+                    {/* 화이트스페이스 */}
+                    <MayoDivider />
+                    <WhitespaceGrid
+                        whitespace={result.whitespace}
+                        venueType={venueType}
+                        targetMonth={startMonth === "" ? null : Number(startMonth)}
+                        datasetYearRange={result.datasetYearRange}
+                        regionLabel={regionLabel}
+                        typeLabel={typeLabel}
+                    />
+
+                    {/* 예산 포지셔닝 */}
                     <MayoDivider />
                     <BudgetScatter
                         budgetEfficiency={result.budgetEfficiency}
@@ -600,11 +607,11 @@ export default function PlannerPage() {
                                         value={`${Math.round(visitorProfile.totalVisitors / daysInMonth(visitorProfile.year, visitorProfile.month) / 10000).toLocaleString("ko-KR")}만명`}
                                     />
                                 </div>
-                                <p className="text-sm" style={{ color: "var(--mayo-text-muted)" }}>
+                                <MayoAlert type="info">
                                     {visitorProfile.outsiderRatio >= visitorProfile.nationalOutsiderRatio
                                         ? "전국 평균보다 외부 유입이 많은 지역입니다. 외지 관광객을 겨냥한 기획이 통할 여지가 있습니다."
                                         : "전국 평균보다 외부 유입이 적은 지역입니다. 외지 관광객 유치보다 지역 주민 참여형 기획이 현실적일 수 있습니다."}
-                                </p>
+                                </MayoAlert>
                             </section>
                         </>
                     )}
@@ -664,18 +671,7 @@ export default function PlannerPage() {
                         </>
                     )}
 
-                    {/* 화이트스페이스 지도 - 축별 표(아코디언)보다 먼저 두 축을 겹쳐 보여준다 */}
-                    <MayoDivider />
-                    <WhitespaceGrid
-                        whitespace={result.whitespace}
-                        venueType={venueType}
-                        targetMonth={startMonth === "" ? null : Number(startMonth)}
-                        datasetYearRange={result.datasetYearRange}
-                        regionLabel={regionLabel}
-                        typeLabel={typeLabel}
-                    />
-
-                    {/* 화이트스페이스 + 데이터 연동 상태 — 아코디언 */}
+                    {/* 화이트스페이스 상세 + 데이터 연동 상태 — 아코디언 */}
                     <MayoAccordion
                         multiple
                         bordered
