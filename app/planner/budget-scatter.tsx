@@ -9,9 +9,9 @@ const MEDIAN_LINE = "#25b366";
 const MIN_POINTS = 8;
 
 // viewBox 기준 좌표 — 실제 렌더링은 w-full로 반응형
-const W = 600;
-const H = 320;
-const PAD = { top: 16, right: 16, bottom: 36, left: 52 };
+const W = 640;
+const H = 400;
+const PAD = { top: 20, right: 20, bottom: 40, left: 56 };
 
 function krw(value: number): string {
     if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}억원`;
@@ -158,17 +158,17 @@ export default function BudgetScatter({
                     </div>
                 )}
 
-                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 280 }} role="img" aria-label="예산 대비 방문객 분포">
+                <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 380 }} role="img" aria-label="예산 대비 방문객 분포">
                     {/* Y축 그리드 */}
                     {powerTicks(yMin, yMax).map((t) => (
                         <g key={`y${t}`}>
                             <line x1={PAD.left} y1={ly(t)} x2={W - PAD.right} y2={ly(t)} stroke="var(--mayo-border)" strokeWidth={0.5} />
-                            <text x={PAD.left - 6} y={ly(t) + 3} textAnchor="end" fontSize={8} fill="var(--mayo-text-muted)">{personTick(t)}</text>
+                            <text x={PAD.left - 6} y={ly(t) + 3} textAnchor="end" fontSize={10} fill="var(--mayo-text-muted)">{personTick(t)}</text>
                         </g>
                     ))}
                     {/* X축 라벨 */}
                     {powerTicks(xMin, xMax).map((t) => (
-                        <text key={`x${t}`} x={lx(t)} y={H - PAD.bottom + 14} textAnchor="middle" fontSize={8} fill="var(--mayo-text-muted)">{krwTick(t)}</text>
+                        <text key={`x${t}`} x={lx(t)} y={H - PAD.bottom + 14} textAnchor="middle" fontSize={10} fill="var(--mayo-text-muted)">{krwTick(t)}</text>
                     ))}
 
                     {/* IQR 대각선 */}
@@ -188,7 +188,7 @@ export default function BudgetScatter({
                                 key={`${p.festivalName}-${p.totalBudgetKrw}`}
                                 cx={lx(p.totalBudgetKrw)}
                                 cy={ly(p.visitors)}
-                                r={isH ? 4 : 2.2}
+                                r={isH ? 5 : 3}
                                 fill={POINT}
                                 stroke={isH ? "var(--mayo-surface)" : "none"}
                                 strokeWidth={isH ? 1.5 : 0}
@@ -203,15 +203,15 @@ export default function BudgetScatter({
                             key={`hit-${p.festivalName}-${p.totalBudgetKrw}`}
                             cx={lx(p.totalBudgetKrw)}
                             cy={ly(p.visitors)}
-                            r={8}
+                            r={10}
                             fill="transparent"
                             onMouseEnter={() => setHovered(p)}
                             onMouseLeave={() => setHovered(null)}
                         />
                     ))}
 
-                    <text x={W - PAD.right} y={H - 4} textAnchor="end" fontSize={8} fill="var(--mayo-text-muted)">총예산 →</text>
-                    <text x={2} y={PAD.top - 4} fontSize={8} fill="var(--mayo-text-muted)">방문객 ↑</text>
+                    <text x={W - PAD.right} y={H - 4} textAnchor="end" fontSize={10} fill="var(--mayo-text-muted)">총예산 →</text>
+                    <text x={2} y={PAD.top - 4} fontSize={10} fill="var(--mayo-text-muted)">방문객 ↑</text>
                 </svg>
             </div>
 
