@@ -272,31 +272,49 @@ export default function DashboardPage() {
                         {/* 방문자 수 바 차트 */}
                         <MayoCard variant="outlined" padding="md">
                             <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>{displayTitle} — 방문자 수 (만명)</p>
-                            <MayoBarChart
-                                data={barData}
-                                series={[
-                                    { key: "외지인", color: "#8b5cf6", label: "외지인(만)" },
-                                    { key: "외국인", color: "#f97316", label: "외국인(만)" },
-                                    { key: "총방문자", color: "#2e8af2", label: "총방문자(만)" },
-                                ]}
-                                height={340}
-                                showGrid
-                                showLegend
-                            />
+                            <div className={filterArea ? "slim-bar-chart" : ""}>
+                                <MayoBarChart
+                                    data={barData}
+                                    series={[
+                                        { key: "외지인", color: "#8b5cf6", label: "외지인(만)" },
+                                        { key: "외국인", color: "#f97316", label: "외국인(만)" },
+                                        { key: "총방문자", color: "#2e8af2", label: "총방문자(만)" },
+                                    ]}
+                                    height={340}
+                                    showGrid
+                                    showLegend
+                                />
+                            </div>
                         </MayoCard>
 
-                        {/* 외지인 비율 바 차트 */}
+                        {/* 외지인 비율 — 전국: 바 차트 / 특정 지역: 파이 차트 */}
                         <MayoCard variant="outlined" padding="md">
-                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>{displayTitle} — 외지인 비율 (%)</p>
-                            <MayoBarChart
-                                data={ratioData}
-                                series={[
-                                    { key: "외지인비율", color: "#10b981", label: "외지인 비율(%)" },
-                                ]}
-                                height={340}
-                                showGrid
-                                showLegend
-                            />
+                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
+                                {displayTitle} — {filterArea ? "방문자 구성 비율" : "외지인 비율 (%)"}
+                            </p>
+                            {filterArea && selectedProfile ? (
+                                <div className="flex justify-center">
+                                    <MayoPieChart
+                                        data={[
+                                            { label: `현지인 (${((selectedProfile.localVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%)`, value: selectedProfile.localVisitors, color: "#2e8af2" },
+                                            { label: `외지인 (${((selectedProfile.outsiderVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%)`, value: selectedProfile.outsiderVisitors, color: "#8b5cf6" },
+                                            { label: `외국인 (${((selectedProfile.foreignVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%)`, value: selectedProfile.foreignVisitors, color: "#f97316" },
+                                        ]}
+                                        size={200}
+                                        showLegend
+                                    />
+                                </div>
+                            ) : (
+                                <MayoBarChart
+                                    data={ratioData}
+                                    series={[
+                                        { key: "외지인비율", color: "#10b981", label: "외지인 비율(%)" },
+                                    ]}
+                                    height={340}
+                                    showGrid
+                                    showLegend
+                                />
+                            )}
                         </MayoCard>
                     </div>
 
