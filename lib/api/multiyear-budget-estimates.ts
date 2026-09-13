@@ -5,6 +5,7 @@ import type { ReliabilityBacktestSummary } from "@/lib/multiyear-series/reliabil
 import type { SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
 import type { SeriesSearchResult } from "@/lib/multiyear-series/series-search";
 import type { SeriesHistoryDetailDto } from "@/lib/multiyear-series/series-history-detail";
+import type { CpiSource } from "@/lib/inflation/cpi-provider";
 import type {
     DataQualityAuditReason,
     DataQualityAuditSeverity,
@@ -97,6 +98,14 @@ export interface MultiYearBudgetEstimateResponse {
         historicalDispersion: number | null;
         /** 이 planningYear의 leakage-safe calibration threshold - calibration 불가(pool<30)면 null. */
         volatilityThreshold: number | null;
+    } | null;
+    /** Feature: KOSIS CPI OpenAPI 연동 — READ-ONLY DIAGNOSTIC. seriesSignal.status==="MATCHED"일
+     *  때만 채워진다(그 외 null). production 계산(estimatedBudgetKrw 등)에는 이 필드가 전혀
+     *  관여하지 않는다 - 이미 계산에 쓰인 cpiTable이 어디서 왔는지만 표시한다. */
+    cpiSourceDiagnostic: {
+        source: CpiSource;
+        resolvedAt: string;
+        latestAvailableCpiYear: number | null;
     } | null;
 }
 

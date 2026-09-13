@@ -1,5 +1,5 @@
 import { quantile } from "@/lib/utils/weighted-statistics";
-import { tryAdjustForCpi } from "./cpi";
+import { CPI_TABLE, tryAdjustForCpi } from "./cpi";
 import { lookupTarget } from "./series-lookup";
 import { FrozenSeriesModel, MatchMethod, SeriesRecordLite } from "./types";
 
@@ -115,8 +115,15 @@ function nullSignal(target: SeriesRecordLite, matchMethod: MatchMethod, ambiguou
  *                    쓴다 - planningYear Y에 대해 참조 연도는 반드시 target보다 과거여야 한다.
  *                    group은 이미 그 fold의 training pool(=datasetYear<targetYear로 구성됨)만
  *                    으로 만들어졌으므로 이 필터는 방어적 재확인이다(leakage 방지 이중 체크).
+ * @param cpiTable Feature: KOSIS CPI OpenAPI 연동 — 생략하면 기존과 동일하게 static `CPI_TABLE`을
+ *                 쓴다(cpi.ts 참고). production route만 명시적으로 resolved table을 넘긴다.
  */
-export function computeOwnHistorySignal(target: SeriesRecordLite, targetYear: number, model: FrozenSeriesModel): OwnHistorySignal {
+export function computeOwnHistorySignal(
+  target: SeriesRecordLite,
+  targetYear: number,
+  model: FrozenSeriesModel,
+  cpiTable: Readonly<Record<number, number>> = CPI_TABLE
+): OwnHistorySignal {
   const lookup = lookupTarget(target, model);
 
   if (lookup.matchedGroupId === null) {
@@ -154,7 +161,7 @@ export function computeOwnHistorySignal(target: SeriesRecordLite, targetYear: nu
   // 등 identity·diagnostics 필드는 전혀 건드리지 않는다 - 오직 median(=medianBudgetKrw)만 바뀐다.
   // CPI_TABLE에 없는 연도가 하나라도 관련되면(예: targetYear>=2027) 전부 nominal로 fallback한다
   // (가장 가까운 연도를 대신 쓰거나 추정하지 않는다 - cpi.ts 참고).
-  const adjustedBudgets = historical.map((h) => tryAdjustForCpi(h.budgetKrw, h.datasetYear, targetYear));
+  const adjustedBudgets = historical.map((h) => tryAdjustForCpi(h.budgetKrw, h.datasetYear, targetYear, cpiTable));
   const cpiFullyAvailable = adjustedBudgets.every((v): v is number => v !== null);
   const medianBudgetKrw = cpiFullyAvailable ? Math.round(quantile(adjustedBudgets as number[], 0.5)) : medianBudgetKrwNominal;
 

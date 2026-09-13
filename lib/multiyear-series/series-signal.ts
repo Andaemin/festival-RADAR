@@ -1,4 +1,5 @@
 import { FestivalType, Region } from "@/lib/domain/enums";
+import { CPI_TABLE } from "./cpi";
 import { computeOwnHistorySignal, SeriesEstimateSource } from "./own-history";
 import { lookupTarget } from "./series-lookup";
 import { buildSyntheticTargetRecord } from "./target-from-query";
@@ -40,6 +41,8 @@ export const SERIES_SIGNAL_NOT_REQUESTED: SeriesSignalResponse = { status: "NOT_
  *                      record만 historical로 쓴다 - referenceDataPolicy(INCLUDE_PUBLISHED_SAME_YEAR
  *                      포함)와 무관하게 항상 이 규칙을 강제한다(model 자체가 이미 그 cutoff로
  *                      빌드돼 있고, computeOwnHistorySignal이 방어적으로 다시 한 번 확인한다).
+ * @param cpiTable Feature: KOSIS CPI OpenAPI 연동 — 생략하면 기존과 동일하게 static `CPI_TABLE`을
+ *                 그대로 computeOwnHistorySignal에 전달한다(own-history.ts 참고).
  */
 export function computeSeriesSignal(
   festivalName: string,
@@ -47,11 +50,12 @@ export function computeSeriesSignal(
   district: string | null,
   typeTokens: Set<FestivalType>,
   planningYear: number,
-  model: FrozenSeriesModel
+  model: FrozenSeriesModel,
+  cpiTable: Readonly<Record<number, number>> = CPI_TABLE
 ): SeriesSignalResponse {
   const target = buildSyntheticTargetRecord({ festivalName, region, district, typeTokens, planningYear });
   const lookup = lookupTarget(target, model);
-  const signal = computeOwnHistorySignal(target, planningYear, model);
+  const signal = computeOwnHistorySignal(target, planningYear, model, cpiTable);
 
   if (lookup.ambiguous) {
     return { status: "AMBIGUOUS" };

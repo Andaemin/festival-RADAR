@@ -1,4 +1,5 @@
 import { PrismaClient } from "@/lib/generated/prisma";
+import { CPI_TABLE } from "./cpi";
 import { buildSeriesTrainingPool } from "./fold";
 import { loadAllSeriesRecords, SeriesRecordWithQuality } from "./record-loader";
 import { computeLeakageSafeVolatilityThreshold, VolatilityThresholdResult } from "./reliability";
@@ -42,12 +43,22 @@ interface ModelCacheState {
 }
 let modelCache: ModelCacheState | null = null;
 
+/** Feature: KOSIS CPI OpenAPI 연동 — threshold는 CPI-adjusted volatility의 median이므로 cpiTable이
+ *  바뀌면 값도 달라질 수 있다. cutoff별로 "이 결과를 계산할 때 쓴 cpiTable object" 참조도 함께
+ *  저장해 두고, 다음 조회에서 참조가 달라지면(=KOSIS provider가 새 dataset을 resolve했으면)
+ *  캐시를 그대로 쓰지 않고 재계산한다. `kosis-cpi-provider.ts`는 TTL 동안 항상 같은 object
+ *  참조를 돌려주므로(값이 같으면 참조도 같다) 이 비교는 `===`만으로 충분하고 매 요청 hashing
+ *  비용이 없다. */
+interface ThresholdCacheEntry {
+  cpiTable: Readonly<Record<number, number>>;
+  result: VolatilityThresholdResult;
+}
 /** PHASE 19-A - {@link computeLeakageSafeVolatilityThreshold}는 연도 수만큼 FrozenSeriesModel을
  *  다시 만드는 무거운 계산이라 modelCache와 동일한 (revision, cutoff) 키 방식으로 별도 캐싱한다. */
 interface ThresholdCacheState {
   revision: number;
-  resolved: Map<number, VolatilityThresholdResult>; // key = effectiveTrainingThroughYear
-  inFlight: Map<number, Promise<VolatilityThresholdResult>>;
+  resolved: Map<number, ThresholdCacheEntry>; // key = effectiveTrainingThroughYear
+  inFlight: Map<number, Promise<ThresholdCacheEntry>>;
 }
 let thresholdCache: ThresholdCacheState | null = null;
 
@@ -138,11 +149,18 @@ export async function getCachedFrozenSeriesModel(
  * threshold(Phase 18-B Part 6/`reliability.ts`)를 캐시한다. `getCachedFrozenSeriesModel`과
  * 완전히 동일한 정규화(cutoff)/single-flight 패턴을 쓴다 - planningYear가 보유 데이터 최댓값보다
  * 미래여도(2027, 2030...) 같은 cutoff를 공유해 캐시가 saturate된다.
+ *
+ * @param cpiTable Feature: KOSIS CPI OpenAPI 연동 — 생략하면 기존과 동일하게 static `CPI_TABLE`을
+ *                 쓴다(기존 호출부/테스트는 전부 이 인자 없이 부르므로 동작이 100% 그대로
+ *                 유지된다). production route는 own-history/reliability에 넘긴 것과 같은
+ *                 resolved table object를 넘겨야 한다 - 참조가 바뀌면(=KOSIS provider가 새
+ *                 dataset을 resolve했으면) 이 cutoff의 캐시된 threshold를 재사용하지 않는다.
  */
 export async function getCachedVolatilityThreshold(
   allSeriesRecords: SeriesRecordWithQuality[],
   revision: number,
-  planningYear: number
+  planningYear: number,
+  cpiTable: Readonly<Record<number, number>> = CPI_TABLE
 ): Promise<VolatilityThresholdResult> {
   ensureRevision(revision);
   if (thresholdCache === null) {
@@ -154,21 +172,24 @@ export async function getCachedVolatilityThreshold(
   const cutoff = effectiveTrainingThroughYear(planningYear, maxAvailableDatasetYear);
 
   const cached = state.resolved.get(cutoff);
-  if (cached) return cached;
+  if (cached && cached.cpiTable === cpiTable) return cached.result;
 
   let buildPromise = state.inFlight.get(cutoff);
   if (!buildPromise) {
     // cutoff+1을 넘겨야 computeLeakageSafeVolatilityThreshold의 `yh < planningYear` 기준이
     // 원래 planningYear로 직접 불렀을 때와 정확히 같은 연도 범위를 순회한다(getCachedFrozenSeriesModel과
     // 동일한 이유).
-    buildPromise = (async () => computeLeakageSafeVolatilityThreshold(allSeriesRecords, cutoff + 1))();
+    buildPromise = (async () => ({
+      cpiTable,
+      result: computeLeakageSafeVolatilityThreshold(allSeriesRecords, cutoff + 1, cpiTable),
+    }))();
     state.inFlight.set(cutoff, buildPromise);
   }
 
-  const result = await buildPromise;
-  state.resolved.set(cutoff, result);
+  const entry = await buildPromise;
+  state.resolved.set(cutoff, entry);
   state.inFlight.delete(cutoff);
-  return result;
+  return entry.result;
 }
 
 /** 테스트 전용 - 모듈 레벨 캐시 상태를 초기화한다(vitest 격리용). production 코드는 호출하지 않는다. */

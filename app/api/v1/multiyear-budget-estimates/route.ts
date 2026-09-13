@@ -10,7 +10,10 @@ import { filterReferencePool } from "@/lib/multiyear/reference-year-filter";
 import { MultiYearQuery } from "@/lib/multiyear/types";
 import { applySeriesPlanningSemantics } from "@/lib/multiyear-series/apply-planning-semantics";
 import { auditSeriesDataQuality, getCachedSeriesRecordBudgetComponents, SeriesGroupDataQualitySummary } from "@/lib/multiyear-series/data-quality-audit";
+import { CPI_TABLE } from "@/lib/multiyear-series/cpi";
 import { getMultiYearDataRevision } from "@/lib/multiyear-series/data-revision";
+import { kosisCpiProvider } from "@/lib/inflation/kosis-cpi-provider";
+import { CpiSource } from "@/lib/inflation/cpi-provider";
 import { computeCpiAdjustedVolatility, computePlanningReliability, EMPTY_FROZEN_SERIES_MODEL } from "@/lib/multiyear-series/reliability";
 import { getCachedFrozenSeriesModel, getCachedSeriesRecords, getCachedVolatilityThreshold } from "@/lib/multiyear-series/runtime-cache";
 import { buildSeriesHistoryDetail, SeriesHistoryDetailDto } from "@/lib/multiyear-series/series-history-detail";
@@ -19,6 +22,14 @@ import { lookupTarget } from "@/lib/multiyear-series/series-lookup";
 import { computeSeriesSignal, SERIES_SIGNAL_NOT_REQUESTED, SeriesSignalResponse } from "@/lib/multiyear-series/series-signal";
 import { buildSyntheticTargetRecord } from "@/lib/multiyear-series/target-from-query";
 import { FrozenSeriesModel } from "@/lib/multiyear-series/types";
+
+/** Feature: KOSIS CPI OpenAPI 연동 — cpiSourceDiagnostic 표시용. cpiTable에 담긴 연도 중 가장
+ *  최근 연도(= KOSIS/static 어느 쪽이든 "이 dataset이 커버하는 최신 연도"). production 계산에는
+ *  전혀 쓰이지 않는다(순수 표시용). */
+function latestCpiYear(cpiTable: Readonly<Record<number, number>>): number | null {
+  const years = Object.keys(cpiTable).map(Number);
+  return years.length === 0 ? null : Math.max(...years);
+}
 
 /**
  * 다년도(2017~) Planning Assistant API - Phase 5에서 Spring parity(84/84 golden fixture)까지
@@ -89,11 +100,19 @@ export async function POST(request: NextRequest) {
   try {
     // PHASE 9C-A.1: festivalName이 없으면 dataRevision 조회조차 하지 않는다(series 비활성 요청은
     // 이 Phase 이전과 완전히 동일한 쿼리만 나간다).
-    const [allRecords, publicationStatusByYear, dataRevision] = await Promise.all([
+    //
+    // Feature: KOSIS CPI OpenAPI 연동 — CPI는 Series own-history 계산에만 쓰인다(Peer는 CPI
+    // 미적용 정책 그대로). festivalName이 없으면(=Series 비활성) 이 provider 호출조차 하지 않는다
+    // - Peer-only 요청은 KOSIS 연동 전후로 네트워크 패턴이 완전히 동일하다.
+    const [allRecords, publicationStatusByYear, dataRevision, cpiDataset] = await Promise.all([
       loadAllMultiYearRecords(prisma),
       loadPublicationStatusByYear(prisma),
       festivalName ? getMultiYearDataRevision(prisma) : Promise.resolve<number | null>(null),
+      festivalName ? kosisCpiProvider.getCpiDataset() : Promise.resolve(null),
     ]);
+    // cpiDataset이 null이면(festivalName 없음) 아래 series 관련 호출들은 어차피 전부 스킵되므로
+    // 이 fallback 값이 실제로 쓰이는 일은 없다 - 타입만 맞춘다(항상 static CPI_TABLE과 동일한 모양).
+    const cpiTable = cpiDataset?.table ?? CPI_TABLE;
 
     // reference pool 0건 판정은 반드시 "실제로 적용될 정책"을 먼저 확정한 뒤 그 정책 기준으로
     // 해야 한다. requested가 아니라 resolveEffectivePolicy가 돌려주는 appliedPolicy로 필터링한
@@ -171,9 +190,9 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      seriesSignal = computeSeriesSignal(festivalName, query.region, seriesMatchDistrict, query.typeTokens, planningYear, model);
+      seriesSignal = computeSeriesSignal(festivalName, query.region, seriesMatchDistrict, query.typeTokens, planningYear, model, cpiTable);
       seriesModelForReliability = model;
-      const thresholdResult = await getCachedVolatilityThreshold(allSeriesRecords, dataRevision, planningYear);
+      const thresholdResult = await getCachedVolatilityThreshold(allSeriesRecords, dataRevision, planningYear, cpiTable);
       volatilityThreshold = thresholdResult.threshold;
 
       if (seriesSignal.status === "MATCHED") {
@@ -195,7 +214,8 @@ export async function POST(request: NextRequest) {
             model,
             allSeriesRecords,
             seriesSignal.estimateSource,
-            seriesSignal.latestHistoricalYear
+            seriesSignal.latestHistoricalYear,
+            cpiTable
           );
 
           // model은 이미 이 planningYear 기준 leakage-safe cutoff로 빌드됐으므로(9절/getCachedFrozenSeriesModel),
@@ -205,7 +225,7 @@ export async function POST(request: NextRequest) {
           seriesDataQualityAudit = auditGroups.find((g) => g.groupId === lookup.matchedGroupId) ?? null;
 
           const historicalForDispersion = model.groupsById.get(lookup.matchedGroupId)!.members.filter((m) => m.datasetYear < planningYear);
-          reliabilityHistoricalDispersion = computeCpiAdjustedVolatility(historicalForDispersion, planningYear);
+          reliabilityHistoricalDispersion = computeCpiAdjustedVolatility(historicalForDispersion, planningYear, cpiTable);
         }
       }
     }
@@ -231,7 +251,8 @@ export async function POST(request: NextRequest) {
       query.typeTokens,
       planningYear,
       seriesModelForReliability,
-      volatilityThreshold
+      volatilityThreshold,
+      cpiTable
     );
 
     return NextResponse.json({
@@ -262,6 +283,14 @@ export async function POST(request: NextRequest) {
       reliabilityDiagnostic:
         seriesSignal.status === "MATCHED"
           ? { reasonKey: reliability.reasonKey, historicalDispersion: reliabilityHistoricalDispersion, volatilityThreshold }
+          : null,
+      // Feature: KOSIS CPI OpenAPI 연동 — READ-ONLY DIAGNOSTIC(§14). Series MATCHED일 때만
+      // 채워진다(다른 진단 필드와 동일 패턴). 이 CPI 값이 KOSIS에서 왔는지 static fallback에서
+      // 왔는지만 표시할 뿐, estimatedBudgetKrw 등 production 계산에는 이미 위에서 cpiTable로
+      // 반영됐다 - 이 필드 자체는 아무 계산에도 입력으로 쓰이지 않는다(순수 표시/진단용).
+      cpiSourceDiagnostic:
+        seriesSignal.status === "MATCHED" && cpiDataset !== null
+          ? { source: cpiDataset.source as CpiSource, resolvedAt: cpiDataset.resolvedAt, latestAvailableCpiYear: latestCpiYear(cpiDataset.table) }
           : null,
     });
   } catch (error) {

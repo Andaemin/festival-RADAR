@@ -1,6 +1,6 @@
 import { FestivalType, Region, VenueType } from "@/lib/domain/enums";
 import { clusterKeyOf, clusterKeyString } from "./scoring";
-import { tryAdjustForCpi } from "./cpi";
+import { CPI_TABLE, tryAdjustForCpi } from "./cpi";
 import { SeriesEstimateSource } from "./own-history";
 import { SeriesRecordWithQuality } from "./record-loader";
 import { FrozenSeriesModel } from "./types";
@@ -100,6 +100,10 @@ export interface SeriesHistoryDetailDto {
  *              판정하지 않는다. 어떤 record가 point estimate source인지 표시하는 데만 쓴다.
  * @param latestHistoricalYear 동일하게 이미 계산된 값을 그대로 받는다(재계산 금지 - 호출부의
  *              seriesSignal과 100% 같은 값이어야 한다).
+ * @param cpiTable Feature: KOSIS CPI OpenAPI 연동 — 생략하면 기존과 동일하게 static `CPI_TABLE`을
+ *              쓴다. production route는 estimatedBudgetKrw 계산에 쓴 것과 **같은** resolved
+ *              table을 넘겨야 한다 - 그래야 이 진단 카드의 parity 검증(§11 page.tsx의
+ *              estimate parity 검증)이 실제 계산과 어긋나지 않는다.
  */
 export function buildSeriesHistoryDetail(
   matchedGroupId: number,
@@ -107,7 +111,8 @@ export function buildSeriesHistoryDetail(
   model: FrozenSeriesModel,
   allSeriesRecords: SeriesRecordWithQuality[],
   estimateSource: SeriesEstimateSource,
-  latestHistoricalYear: number
+  latestHistoricalYear: number,
+  cpiTable: Readonly<Record<number, number>> = CPI_TABLE
 ): SeriesHistoryDetailDto | null {
   const group = model.groupsById.get(matchedGroupId);
   if (!group) return null;
@@ -120,7 +125,7 @@ export function buildSeriesHistoryDetail(
 
   // own-history.ts와 동일한 all-or-nothing CPI 규칙: 하나라도 CPI_TABLE에 없으면(예:
   // planningYear>=2027이라 CPI[planningYear-1]이 없음) 전체 nominal fallback.
-  const adjustedBudgets = historical.map((h) => tryAdjustForCpi(h.budgetKrw, h.datasetYear, planningYear));
+  const adjustedBudgets = historical.map((h) => tryAdjustForCpi(h.budgetKrw, h.datasetYear, planningYear, cpiTable));
   const cpiFullyAvailable = adjustedBudgets.every((v): v is number => v !== null);
 
   // PHASE G0 — own-history.ts와 동일한 tie-break(동일 latestHistoricalYear에 record가 2개 이상이면

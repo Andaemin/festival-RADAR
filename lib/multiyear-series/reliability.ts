@@ -1,6 +1,6 @@
 import { FestivalType, Region } from "@/lib/domain/enums";
 import { quantile } from "@/lib/utils/weighted-statistics";
-import { tryAdjustForCpi } from "./cpi";
+import { CPI_TABLE, tryAdjustForCpi } from "./cpi";
 import { buildSeriesEvalTargets, buildSeriesTrainingPool } from "./fold";
 import { SeriesRecordWithQuality } from "./record-loader";
 import { lookupTarget } from "./series-lookup";
@@ -95,18 +95,25 @@ export function earliestOofYear(allSeriesRecords: { datasetYear: number }[]): nu
  * @param historical group의 historical(< targetYear) member들의 (budgetKrw, datasetYear) 목록.
  * @param targetYear 이 volatility가 속한 target의 planningYear - CPI base year(targetYear-1)를
  *                    정한다.
+ * @param cpiTable Feature: KOSIS CPI OpenAPI 연동 — 생략하면 기존과 동일하게 static `CPI_TABLE`을
+ *                 쓴다. production route는 own-history.ts에 넘긴 것과 **같은** resolved table을
+ *                 여기도 넘겨야 한다(§6 - 한 request 안에서 source를 섞지 않기 위함).
  * @returns historyCount&lt;2거나 P25/P75가 0 이하(invalid/nonpositive edge case, 실제 VALID
  *          budget 데이터에서는 관측된 적 없음)면 null.
  */
-export function computeCpiAdjustedVolatility(historical: { budgetKrw: number; datasetYear: number }[], targetYear: number): number | null {
+export function computeCpiAdjustedVolatility(
+  historical: { budgetKrw: number; datasetYear: number }[],
+  targetYear: number,
+  cpiTable: Readonly<Record<number, number>> = CPI_TABLE
+): number | null {
   if (historical.length < 2) return null;
 
   // own-history.ts의 medianBudgetKrw CPI fallback과 대칭 정책: 관련 연도 중 하나라도
-  // CPI_TABLE에 없으면(예: 이 target 자신의 planningYear>=2027) 전부 nominal로 fallback한다.
+  // cpiTable에 없으면(예: 이 target 자신의 planningYear>=2027) 전부 nominal로 fallback한다.
   // PHASE 19-A 최종 보고 참고 - Phase 18-B는 실제 2027 target으로 이 case를 테스트하지 못했다
   // (2018~2026 데이터만 존재) - own-history.ts에 이미 적용된 fallback 정책을 대칭 적용한 것이며
   // 새 정책을 발명한 것이 아니다.
-  const adjustedRaw = historical.map((h) => tryAdjustForCpi(h.budgetKrw, h.datasetYear, targetYear));
+  const adjustedRaw = historical.map((h) => tryAdjustForCpi(h.budgetKrw, h.datasetYear, targetYear, cpiTable));
   const cpiOk = adjustedRaw.every((v): v is number => v !== null);
   const budgets = (cpiOk ? (adjustedRaw as number[]) : historical.map((h) => h.budgetKrw)).slice().sort((a, b) => a - b);
 
@@ -155,6 +162,9 @@ export function tierFromVolatility(historyCount: number, volatility: number | nu
  *
  * @param threshold `getCachedVolatilityThreshold`(runtime-cache.ts)가 계산한 이 planningYear의
  *                   threshold. null이면 calibration 불가로 처리(HIGH 기본값).
+ * @param cpiTable Feature: KOSIS CPI OpenAPI 연동 — 생략하면 기존과 동일하게 static `CPI_TABLE`을
+ *                 쓴다. production route는 `threshold` 계산에 쓴 것과 같은 resolved table을
+ *                 여기도 넘겨야 한다(§6).
  */
 export function computePlanningReliability(
   seriesSignal: SeriesSignalResponse,
@@ -164,7 +174,8 @@ export function computePlanningReliability(
   typeTokens: Set<FestivalType>,
   planningYear: number,
   model: FrozenSeriesModel,
-  threshold: number | null
+  threshold: number | null,
+  cpiTable: Readonly<Record<number, number>> = CPI_TABLE
 ): PlanningReliabilityResult {
   const seriesApplied = seriesSignal.status === "MATCHED" && seriesSignal.seriesEstimatedBudgetKrw !== undefined;
   if (!seriesApplied) {
@@ -173,7 +184,7 @@ export function computePlanningReliability(
 
   const historical = historicalMembers(festivalName, region, district, typeTokens, planningYear, model);
   const historyCount = historical.length;
-  const volatility = computeCpiAdjustedVolatility(historical, planningYear);
+  const volatility = computeCpiAdjustedVolatility(historical, planningYear, cpiTable);
   const tier = tierFromVolatility(historyCount, volatility, threshold);
   // PHASE 31-B — tier 산정 로직(tierFromVolatility)은 그대로다. reasonKey만 historyCount<=1을
   // 별도로 구분한다: 이 경우 volatility 자체가 정의되지 않으므로(위 computeCpiAdjustedVolatility
@@ -209,8 +220,17 @@ export interface VolatilityThresholdResult {
  * 비용이 크다(연도 수 × 그 해 evalTarget 수만큼 FrozenSeriesModel 재구성 + signal 계산) - 매
  * 요청마다 부르지 말고 runtime-cache.ts의 getCachedVolatilityThreshold를 통해 캐싱된 결과를 써야
  * 한다.
+ *
+ * @param cpiTable Feature: KOSIS CPI OpenAPI 연동 — 생략하면 기존과 동일하게 static `CPI_TABLE`을
+ *                 쓴다(모든 기존 호출부/canonical benchmark는 이 인자 없이 부르므로 동작이 100%
+ *                 그대로 유지된다). `getCachedVolatilityThreshold`(runtime-cache.ts)가 cache key에
+ *                 이 table의 version을 포함시켜, table이 바뀌면 캐시된 threshold도 함께 무효화한다.
  */
-export function computeLeakageSafeVolatilityThreshold(allSeriesRecords: SeriesRecordWithQuality[], planningYear: number): VolatilityThresholdResult {
+export function computeLeakageSafeVolatilityThreshold(
+  allSeriesRecords: SeriesRecordWithQuality[],
+  planningYear: number,
+  cpiTable: Readonly<Record<number, number>> = CPI_TABLE
+): VolatilityThresholdResult {
   const earliest = earliestOofYear(allSeriesRecords);
   const pool: number[] = [];
 
@@ -222,14 +242,14 @@ export function computeLeakageSafeVolatilityThreshold(allSeriesRecords: SeriesRe
     const model = buildFrozenSeriesModel(trainingPool);
     for (const t of evalTargets) {
       if (t.region === null) continue; // buildSeriesEvalTargets가 이미 걸렀지만 타입 방어
-      const signal = computeSeriesSignal(t.festivalName, t.region, t.district, t.typeTokens, yh, model);
+      const signal = computeSeriesSignal(t.festivalName, t.region, t.district, t.typeTokens, yh, model, cpiTable);
       const seriesApplied = signal.status === "MATCHED" && signal.seriesEstimatedBudgetKrw !== undefined;
       if (!seriesApplied) continue;
 
       const historical = historicalMembers(t.festivalName, t.region, t.district, t.typeTokens, yh, model);
       if (historical.length < 2) continue;
 
-      const vol = computeCpiAdjustedVolatility(historical, yh);
+      const vol = computeCpiAdjustedVolatility(historical, yh, cpiTable);
       if (vol !== null) pool.push(vol);
     }
   }
