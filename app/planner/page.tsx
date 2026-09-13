@@ -466,28 +466,43 @@ export default function PlannerPage() {
                     )}
 
                     {/* 기회 점수 요약 — 큰 숫자 카드 */}
-                    {result.recommendations.filter((r) => r.kind !== "BUDGET_EFFICIENCY").length > 0 && (
+                    {result.recommendations.length > 0 && (
                         <div>
                             <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>기회 점수 한눈에 보기</p>
                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
-                                {result.recommendations
-                                    .filter((r) => r.kind !== "BUDGET_EFFICIENCY")
+                                {[...result.recommendations]
                                     .sort((a, b) => b.opportunityScore - a.opportunityScore)
-                                    .map((rec) => (
-                                        <div
-                                            key={rec.id}
-                                            className="rounded-xl p-3 text-center"
-                                            style={{
-                                                background: "var(--mayo-surface)",
-                                                border: `2px solid ${rec.opportunityScore >= 60 ? "#10b981" : rec.opportunityScore >= 30 ? "#f59e0b" : "var(--mayo-border)"}`,
-                                            }}
-                                        >
-                                            <p className="text-3xl sm:text-4xl font-black" style={{ color: "var(--mayo-text)" }}>{rec.opportunityScore}</p>
-                                            <MayoTag color={scoreColor(rec.opportunityScore)} variant="soft" size="sm">{scoreLabel(rec.opportunityScore)}</MayoTag>
-                                            <p className="text-[11px] mt-1.5 leading-tight truncate" style={{ color: "var(--mayo-text-muted)" }}>{rec.title}</p>
-                                            <div className="mt-1"><MayoTag color={KIND_TAG_COLOR[rec.kind]} variant="solid" size="sm">{KIND_LABEL[rec.kind]}</MayoTag></div>
-                                        </div>
-                                    ))
+                                    .map((rec) => {
+                                        // 예산 기준 카드는 점수 대신 1인당 투입비 중앙값을 보여준다 (점수는 항상 0)
+                                        const isBudget = rec.kind === "BUDGET_EFFICIENCY";
+                                        const median = result.budgetEfficiency.medianCostPerVisitorKrw;
+                                        return (
+                                            <div
+                                                key={rec.id}
+                                                className="rounded-xl p-3 text-center"
+                                                style={{
+                                                    background: "var(--mayo-surface)",
+                                                    border: `2px solid ${!isBudget && rec.opportunityScore >= 60 ? "#10b981" : !isBudget && rec.opportunityScore >= 30 ? "#f59e0b" : "var(--mayo-border)"}`,
+                                                }}
+                                            >
+                                                {isBudget ? (
+                                                    <>
+                                                        <p className="text-xl sm:text-2xl font-black leading-tight py-1.5 sm:py-2" style={{ color: "var(--mayo-text)" }}>
+                                                            {median !== null ? `${median.toLocaleString("ko-KR")}원` : "—"}
+                                                        </p>
+                                                        <MayoTag color="gray" variant="soft" size="sm">1인당 투입비 중앙값</MayoTag>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <p className="text-3xl sm:text-4xl font-black" style={{ color: "var(--mayo-text)" }}>{rec.opportunityScore}</p>
+                                                        <MayoTag color={scoreColor(rec.opportunityScore)} variant="soft" size="sm">{scoreLabel(rec.opportunityScore)}</MayoTag>
+                                                    </>
+                                                )}
+                                                <p className="text-[11px] mt-1.5 leading-tight truncate" style={{ color: "var(--mayo-text-muted)" }}>{rec.title}</p>
+                                                <div className="mt-1"><MayoTag color={KIND_TAG_COLOR[rec.kind]} variant="solid" size="sm">{KIND_LABEL[rec.kind]}</MayoTag></div>
+                                            </div>
+                                        );
+                                    })
                                 }
                             </div>
                         </div>
