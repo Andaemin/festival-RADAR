@@ -73,3 +73,11 @@ body {
 .mayo-dialog__title {
   font-family: "TossFace", var(--font-pretendard), Arial, Helvetica, sans-serif !important;
 }
+
+/* 파이 차트 범례 라벨 크기·굵기 강화 */
+.pie-chart-labels .mayo-pie-chart__legend-label,
+.pie-chart-labels .mayo-pie-chart__legend span,
+.pie-chart-labels .mayo-pie-chart__legend-item {
+  font-size: 0.85rem !important;
+  font-weight: 600 !important;
+}

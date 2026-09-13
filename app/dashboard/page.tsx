@@ -179,6 +179,25 @@ export default function DashboardPage() {
     const selectedAreaName = AREA_CODES.find((a) => a.code === filterArea)?.name ?? "";
     const displayTitle = filterArea ? `${selectedAreaName} 관광 수요` : "전국 관광 수요 강도";
 
+    // 조회 중인 년·월 라벨
+    const dateParts = visitorDate.split("-");
+    const displayYear = dateParts[0];
+    const displayMonth = Number(dateParts[1]);
+
+    // 지역 필터 시 전국 대비 비교 데이터
+    const comparisonData = useMemo(() => {
+        if (!filterArea || !selectedProfile || !summary) return null;
+        const nationalAvgTotal = summary.totalVisitors / profiles.length;
+        const nationalAvgOutsider = summary.totalOutsider / profiles.length;
+        const nationalAvgForeign = summary.totalForeign / profiles.length;
+        return {
+            totalVsNational: nationalAvgTotal > 0 ? selectedProfile.totalVisitors / nationalAvgTotal : 0,
+            outsiderVsNational: nationalAvgOutsider > 0 ? selectedProfile.outsiderVisitors / nationalAvgOutsider : 0,
+            foreignVsNational: nationalAvgForeign > 0 ? selectedProfile.foreignVisitors / nationalAvgForeign : 0,
+            nationalAvgRatio: summary.avgOutsiderRatio,
+        };
+    }, [filterArea, selectedProfile, summary, profiles.length]);
+
     return (
         <main className="min-h-screen flex flex-col p-4 lg:p-5 gap-4" style={{ background: "var(--mayo-bg-subtle)" }}>
             {/* 헤더 */}
@@ -322,22 +341,41 @@ export default function DashboardPage() {
                             )}
                         </MayoCard>
 
-                        {/* 외지인 비율 — 전국: 바 차트 / 특정 지역: 파이 차트 */}
+                        {/* 외지인 비율 — 전국: 바 차트 / 특정 지역: 전국 대비 비교 */}
                         <MayoCard variant="outlined" padding="md">
                             <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
-                                {displayTitle} — {filterArea ? "방문자 구성 비율" : "외지인 비율 (%)"}
+                                {displayTitle} — {filterArea ? "전국 평균 대비" : "외지인 비율 (%)"}
                             </p>
-                            {filterArea && selectedProfile ? (
-                                <div className="flex justify-center">
-                                    <MayoPieChart
-                                        data={[
-                                            { label: `현지인 (${((selectedProfile.localVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%)`, value: selectedProfile.localVisitors, color: "#2e8af2" },
-                                            { label: `외지인 (${((selectedProfile.outsiderVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%)`, value: selectedProfile.outsiderVisitors, color: "#8b5cf6" },
-                                            { label: `외국인 (${((selectedProfile.foreignVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%)`, value: selectedProfile.foreignVisitors, color: "#f97316" },
-                                        ]}
-                                        size={200}
-                                        showLegend
+                            {filterArea && selectedProfile && comparisonData ? (
+                                <div className="flex flex-col gap-5 py-2">
+                                    <ComparisonRow
+                                        label="총 방문자"
+                                        ratio={comparisonData.totalVsNational}
+                                        color="#2e8af2"
                                     />
+                                    <ComparisonRow
+                                        label="외지인 수"
+                                        ratio={comparisonData.outsiderVsNational}
+                                        color="#8b5cf6"
+                                    />
+                                    <ComparisonRow
+                                        label="외국인 수"
+                                        ratio={comparisonData.foreignVsNational}
+                                        color="#f97316"
+                                    />
+                                    <div className="mt-1 pt-3" style={{ borderTop: "1px solid var(--mayo-border)" }}>
+                                        <div className="flex justify-between items-center text-sm">
+                                            <span style={{ color: "var(--mayo-text-muted)" }}>외지인 비율</span>
+                                            <span>
+                                                <strong style={{ color: "var(--mayo-text)", fontSize: "1rem" }}>
+                                                    {(selectedProfile.outsiderRatio * 100).toFixed(1)}%
+                                                </strong>
+                                                <span className="ml-2 text-xs" style={{ color: "var(--mayo-text-muted)" }}>
+                                                    (전국 평균 {(comparisonData.nationalAvgRatio * 100).toFixed(1)}%)
+                                                </span>
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
                             ) : (
                                 <MayoBarChart
@@ -359,54 +397,56 @@ export default function DashboardPage() {
                             <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
                                 {selectedProfile ? `${selectedAreaName} 방문자 구성` : "방문자 수 상위 5개 시도"}
                             </p>
-                            <div className="flex justify-center">
-                                <MayoPieChart data={pieData} size={180} showLegend />
+                            <div className="flex justify-center pie-chart-labels">
+                                <MayoPieChart data={pieData} size={200} showLegend />
                             </div>
                         </MayoCard>
 
                         <MayoCard variant="outlined" padding="md">
-                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>인사이트</p>
-                            <div className="flex flex-col gap-2 text-sm" style={{ color: "var(--mayo-text-secondary)" }}>
+                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
+                                인사이트 — {displayYear}년 {displayMonth}월
+                            </p>
+                            <div className="flex flex-col gap-3" style={{ color: "var(--mayo-text)" }}>
                                 {selectedProfile ? (
                                     <>
                                         <InsightRow
                                             emoji="📍"
-                                            text={`${selectedAreaName}의 총 방문자는 ${fmtNum(selectedProfile.totalVisitors)}명입니다.`}
+                                            content={<>{displayYear}년 {displayMonth}월 {selectedAreaName}의 총 방문자는 <Hl>{fmtNum(selectedProfile.totalVisitors)}명</Hl>입니다.</>}
                                         />
                                         <InsightRow
                                             emoji="🧳"
-                                            text={`외지인 비율 ${(selectedProfile.outsiderRatio * 100).toFixed(1)}%로 전국 ${selectedProfile.outsiderRatioRank}위입니다.`}
+                                            content={<>외지인 비율 <Hl>{(selectedProfile.outsiderRatio * 100).toFixed(1)}%</Hl>로 전국 <Hl>{selectedProfile.outsiderRatioRank}위</Hl>입니다.</>}
                                         />
                                         <InsightRow
                                             emoji={selectedProfile.outsiderRatio > selectedProfile.nationalOutsiderRatio ? "🔥" : "💡"}
-                                            text={
+                                            content={
                                                 selectedProfile.outsiderRatio > selectedProfile.nationalOutsiderRatio
-                                                    ? "전국 평균보다 외지인 비율이 높아 관광 유입이 활발한 지역입니다."
-                                                    : "전국 평균보다 외지인 비율이 낮아, 외부 관광객 유치 전략이 필요합니다."
+                                                    ? <>전국 평균보다 외지인 비율이 <Hl color="#10b981">높아</Hl> 관광 유입이 활발한 지역입니다.</>
+                                                    : <>전국 평균보다 외지인 비율이 <Hl color="#ef4444">낮아</Hl>, 외부 관광객 유치 전략이 필요합니다.</>
                                             }
                                         />
                                         <InsightRow
                                             emoji="🌍"
-                                            text={`외국인 방문자는 ${fmtNum(selectedProfile.foreignVisitors)}명으로 전체의 ${((selectedProfile.foreignVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%를 차지합니다.`}
+                                            content={<>외국인 방문자는 <Hl>{fmtNum(selectedProfile.foreignVisitors)}명</Hl>으로 전체의 <Hl>{((selectedProfile.foreignVisitors / selectedProfile.totalVisitors) * 100).toFixed(1)}%</Hl>를 차지합니다.</>}
                                         />
                                     </>
                                 ) : summary ? (
                                     <>
                                         <InsightRow
                                             emoji="📊"
-                                            text={`이번 달 전국 총 방문자는 ${fmtNum(summary.totalVisitors)}명입니다.`}
+                                            content={<>{displayYear}년 {displayMonth}월 전국 총 방문자는 <Hl>{fmtNum(summary.totalVisitors)}명</Hl>입니다.</>}
                                         />
                                         <InsightRow
                                             emoji="🏆"
-                                            text={`방문자 수 1위는 ${summary.topRegion?.regionLabel}(${fmtNum(summary.topRegion?.totalVisitors ?? 0)}명)입니다.`}
+                                            content={<>방문자 수 1위는 <Hl>{summary.topRegion?.regionLabel}</Hl>(<Hl>{fmtNum(summary.topRegion?.totalVisitors ?? 0)}명</Hl>)입니다.</>}
                                         />
                                         <InsightRow
                                             emoji="🧳"
-                                            text={`외지인 비율 1위는 ${summary.topOutsider?.regionLabel}(${(summary.topOutsider?.outsiderRatio * 100).toFixed(1)}%)입니다.`}
+                                            content={<>외지인 비율 1위는 <Hl>{summary.topOutsider?.regionLabel}</Hl>(<Hl>{(summary.topOutsider?.outsiderRatio * 100).toFixed(1)}%</Hl>)입니다.</>}
                                         />
                                         <InsightRow
                                             emoji="💡"
-                                            text="좌측 지역 필터를 사용하면 특정 시도의 상세 분석을 확인할 수 있습니다."
+                                            content={<>좌측 지역 필터를 사용하면 특정 시도의 상세 분석을 확인할 수 있습니다.</>}
                                         />
                                     </>
                                 ) : null}
@@ -496,11 +536,43 @@ function MetricBox({ label, value, sub, tagColor, tagLabel }: {
     );
 }
 
-function InsightRow({ emoji, text }: { emoji: string; text: string }) {
+function InsightRow({ emoji, content }: { emoji: string; content: React.ReactNode }) {
     return (
-        <div className="flex items-start gap-2">
-            <span className="shrink-0">{emoji}</span>
-            <span>{text}</span>
+        <div className="flex items-start gap-2.5 text-[0.9rem] leading-relaxed">
+            <span className="shrink-0 text-base">{emoji}</span>
+            <span>{content}</span>
+        </div>
+    );
+}
+
+function Hl({ children, color }: { children: React.ReactNode; color?: string }) {
+    return (
+        <strong style={{ color: color ?? "var(--mayo-text)", fontWeight: 700 }}>{children}</strong>
+    );
+}
+
+function ComparisonRow({ label, ratio, color }: { label: string; ratio: number; color: string }) {
+    const pct = Math.min(ratio * 100, 200);
+    const display = ratio >= 10 ? `${ratio.toFixed(0)}x` : `${ratio.toFixed(1)}x`;
+    return (
+        <div>
+            <div className="flex justify-between items-center mb-1.5">
+                <span className="text-sm font-medium" style={{ color: "var(--mayo-text)" }}>{label}</span>
+                <span className="text-sm font-bold" style={{ color }}>
+                    전국 평균 대비 {display}
+                </span>
+            </div>
+            <div className="w-full h-2 rounded-full" style={{ background: "var(--mayo-bg-subtle)" }}>
+                <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${Math.min(pct / 2, 100)}%`, background: color, opacity: 0.8 }}
+                />
+            </div>
+            <div className="flex justify-between mt-0.5">
+                <span className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>0x</span>
+                <span className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>전국 평균 (1x)</span>
+                <span className="text-[10px]" style={{ color: "var(--mayo-text-muted)" }}>2x</span>
+            </div>
         </div>
     );
 }
