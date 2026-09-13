@@ -66,7 +66,7 @@ export default function DashboardPage() {
     const [visitorDate, setVisitorDate] = useState(() => {
         const now = new Date();
         const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     });
 
     const [profiles, setProfiles] = useState<VisitorProfile[]>([]);
@@ -231,7 +231,7 @@ export default function DashboardPage() {
                         value={visitorDate}
                         onChange={handleDateChange}
                         placeholder="조회할 월 선택"
-                        format="YYYY-MM"
+                        mode="month"
                     />
                 </div>
                 <MayoBtn
@@ -397,7 +397,7 @@ export default function DashboardPage() {
                             <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>
                                 {selectedProfile ? `${selectedAreaName} 방문자 구성` : "방문자 수 상위 5개 시도"}
                             </p>
-                            <div className="flex justify-center pie-chart-labels">
+                            <div className="flex justify-center">
                                 <MayoPieChart data={pieData} size={200} showLegend />
                             </div>
                         </MayoCard>
@@ -446,7 +446,7 @@ export default function DashboardPage() {
                                         />
                                         <InsightRow
                                             emoji="💡"
-                                            content={<>좌측 지역 필터를 사용하면 특정 시도의 상세 분석을 확인할 수 있습니다.</>}
+                                            content={<>상단의 지역 필터에서 시도를 선택하면 해당 지역의 상세 분석을 확인할 수 있습니다.</>}
                                         />
                                     </>
                                 ) : null}
