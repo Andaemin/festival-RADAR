@@ -57,3 +57,19 @@ body {
   transform-box: fill-box;
   transform-origin: center bottom;
 }
+
+/* MayoDialog 중앙 정렬 + 데스크톱 크기 확대 */
+.mayo-dialog {
+  margin: auto;
+  max-height: 85vh;
+}
+.mayo-dialog--lg {
+  width: min(900px, 90vw);
+  max-width: 900px;
+}
+.mayo-dialog *,
+.mayo-dialog__header,
+.mayo-dialog__body,
+.mayo-dialog__title {
+  font-family: "TossFace", var(--font-pretendard), Arial, Helvetica, sans-serif !important;
+}

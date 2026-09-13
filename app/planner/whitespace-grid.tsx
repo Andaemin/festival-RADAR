@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { MayoCard, MayoTag } from "mayoui-react";
 import type { WhitespaceGridCell, WhitespaceReport } from "@/lib/planner/types";
 
 const HIGH = "#25b366";
 const INVERT_AT = 0.55;
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+const CELL_MAX = 42;
+const CELL_MIN = 22;
+const LABEL_COL = 52;
+const GAP = 2; // borderSpacing
 
 function oneDecimal(value: number): string {
     return value.toFixed(1);
@@ -31,6 +35,22 @@ export default function WhitespaceGrid({
 }: Props) {
     const { venueMonthGrid: grid, venueMonthCoverage: coverage } = whitespace;
     const [hovered, setHovered] = useState<WhitespaceGridCell | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    const [cell, setCell] = useState(CELL_MAX);
+
+    useEffect(() => {
+        function measure() {
+            if (!containerRef.current) return;
+            const w = containerRef.current.clientWidth;
+            // 12 columns + label col + gaps
+            const available = w - LABEL_COL - GAP * 13;
+            const size = Math.floor(available / 12);
+            setCell(Math.max(CELL_MIN, Math.min(CELL_MAX, size)));
+        }
+        measure();
+        window.addEventListener("resize", measure);
+        return () => window.removeEventListener("resize", measure);
+    }, []);
 
     if (grid.length === 0) return null;
 
@@ -52,6 +72,7 @@ export default function WhitespaceGrid({
     };
 
     return (
+        <div ref={containerRef}>
         <MayoCard variant="outlined" padding="md" style={{ overflow: "visible" }}>
             <h2 className="text-base font-bold mb-1" style={{ color: "var(--mayo-text)" }}>
                 화이트스페이스 지도 — 장소 × 시기
@@ -88,17 +109,17 @@ export default function WhitespaceGrid({
                     </div>
                 )}
 
-                <table className="mx-auto" style={{ borderSpacing: 3, borderCollapse: "separate" }}>
+                <table className="mx-auto" style={{ borderSpacing: 2, borderCollapse: "separate" }}>
                     <thead>
                         <tr>
-                            <th style={{ width: 56 }} />
+                            <th />
                             {MONTHS.map((m) => {
                                 const lit = m === targetMonth || hovered?.month === m;
                                 return (
                                     <th
                                         key={m}
-                                        className={`text-[11px] pb-1 text-center ${lit ? "font-bold" : "font-normal"}`}
-                                        style={{ color: lit ? "var(--mayo-text)" : "var(--mayo-text-muted)", width: 30 }}
+                                        className={`text-[10px] pb-0.5 text-center ${lit ? "font-bold" : "font-normal"}`}
+                                        style={{ color: lit ? "var(--mayo-text)" : "var(--mayo-text-muted)", width: cell, minWidth: cell, maxWidth: cell }}
                                     >
                                         {m}월
                                     </th>
@@ -114,7 +135,7 @@ export default function WhitespaceGrid({
                             return (
                                 <tr key={v}>
                                     <th
-                                        className={`text-[11px] text-right pr-1.5 whitespace-nowrap ${lit ? "font-bold" : "font-normal"}`}
+                                        className={`text-[10px] text-right pr-1 whitespace-nowrap ${lit ? "font-bold" : "font-normal"}`}
                                         style={{ color: lit ? "var(--mayo-text)" : "var(--mayo-text-muted)" }}
                                     >
                                         {row[0].venueLabel}
@@ -126,12 +147,15 @@ export default function WhitespaceGrid({
                                         return (
                                             <td
                                                 key={c.month}
-                                                className="text-[11px] text-center rounded cursor-default"
+                                                className="text-[10px] text-center rounded cursor-default"
                                                 onMouseEnter={() => setHovered(c)}
                                                 onMouseLeave={() => setHovered(null)}
                                                 style={{
-                                                    height: 28,
-                                                    padding: "0 2px",
+                                                    width: cell,
+                                                    minWidth: cell,
+                                                    maxWidth: cell,
+                                                    height: cell,
+                                                    padding: 0,
                                                     background: score === null
                                                         ? "var(--mayo-bg-subtle)"
                                                         : `rgba(37, 179, 102, ${(0.06 + score * 0.9).toFixed(3)})`,
@@ -194,5 +218,6 @@ export default function WhitespaceGrid({
                 </div>
             )}
         </MayoCard>
+        </div>
     );
 }

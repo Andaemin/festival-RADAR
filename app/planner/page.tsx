@@ -31,7 +31,7 @@ import type {
 } from "@/lib/planner/types";
 import MonthChart from "./month-chart";
 import WhitespaceGrid from "./whitespace-grid";
-import BudgetScatter from "./budget-scatter";
+import BudgetScatter, { BudgetDetailTable } from "./budget-scatter";
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -579,26 +579,33 @@ export default function PlannerPage() {
                         />
                     </section>
 
-                    {/* 화이트스페이스 */}
+                    {/* 화이트스페이스 + 예산 포지셔닝 나란히 (4:6) */}
                     <MayoDivider />
-                    <WhitespaceGrid
-                        whitespace={result.whitespace}
-                        venueType={venueType}
-                        targetMonth={startMonth === "" ? null : Number(startMonth)}
-                        datasetYearRange={result.datasetYearRange}
-                        regionLabel={regionLabel}
-                        typeLabel={typeLabel}
-                    />
+                    <div className="grid grid-cols-1 lg:grid-cols-10 gap-3 items-start">
+                        <div className="lg:col-span-4">
+                            <WhitespaceGrid
+                                whitespace={result.whitespace}
+                                venueType={venueType}
+                                targetMonth={startMonth === "" ? null : Number(startMonth)}
+                                datasetYearRange={result.datasetYearRange}
+                                regionLabel={regionLabel}
+                                typeLabel={typeLabel}
+                            />
+                        </div>
+                        <div className="lg:col-span-6">
+                            <BudgetScatter
+                                budgetEfficiency={result.budgetEfficiency}
+                                datasetYearRange={result.datasetYearRange}
+                                regionSameTypeCount={result.cohort.regionSameType}
+                                regionLabel={regionLabel}
+                                typeLabel={typeLabel}
+                                hideDetailTable
+                            />
+                        </div>
+                    </div>
 
-                    {/* 예산 포지셔닝 */}
-                    <MayoDivider />
-                    <BudgetScatter
-                        budgetEfficiency={result.budgetEfficiency}
-                        datasetYearRange={result.datasetYearRange}
-                        regionSameTypeCount={result.cohort.regionSameType}
-                        regionLabel={regionLabel}
-                        typeLabel={typeLabel}
-                    />
+                    {/* 축제별 예산 효율 상세 테이블 */}
+                    <BudgetDetailTable budgetEfficiency={result.budgetEfficiency} />
 
                     {/* 방문자 구성 */}
                     {visitorProfile && (
