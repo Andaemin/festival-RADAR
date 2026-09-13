@@ -12,6 +12,8 @@ import {
     MayoTable,
     MayoDivider,
     MayoPieChart,
+    MayoDatePicker,
+    MayoProgress,
 } from "mayoui-react";
 
 const AREA_CODES = [
@@ -61,10 +63,10 @@ function fmtNum(n: number): string {
 
 export default function DashboardPage() {
     const [filterArea, setFilterArea] = useState("");
-    const [visitorMonth, setVisitorMonth] = useState(() => {
+    const [visitorDate, setVisitorDate] = useState(() => {
         const now = new Date();
         const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
     });
 
     const [profiles, setProfiles] = useState<VisitorProfile[]>([]);
@@ -72,10 +74,11 @@ export default function DashboardPage() {
     const [error, setError] = useState<string | null>(null);
     const [fetched, setFetched] = useState(false);
 
-    async function fetchData() {
-        const [yearStr, monthStr] = visitorMonth.split("-");
-        const year = Number(yearStr);
-        const month = Number(monthStr);
+    async function fetchData(dateStr?: string) {
+        const d = dateStr ?? visitorDate;
+        const parts = d.split("-");
+        const year = Number(parts[0]);
+        const month = Number(parts[1]);
         if (!year || !month) return;
 
         setLoading(true);
@@ -98,6 +101,12 @@ export default function DashboardPage() {
         fetchData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // 월 변경 시 자동 조회
+    function handleDateChange(value: string) {
+        setVisitorDate(value);
+        fetchData(value);
+    }
 
     // 필터된 프로필
     const filteredLabel = filterArea ? CODE_TO_SHORT[filterArea] ?? "" : "";
@@ -199,19 +208,18 @@ export default function DashboardPage() {
                 />
                 <div>
                     <label className="text-xs font-medium block mb-1" style={{ color: "var(--mayo-text-muted)" }}>조회 월</label>
-                    <input
-                        type="month"
-                        value={visitorMonth}
-                        onChange={(e) => setVisitorMonth(e.target.value)}
-                        className="w-full rounded border px-2 py-1.5 text-sm"
-                        style={{ background: "var(--mayo-bg)", color: "var(--mayo-text)", borderColor: "var(--mayo-border)" }}
+                    <MayoDatePicker
+                        value={visitorDate}
+                        onChange={handleDateChange}
+                        placeholder="조회할 월 선택"
+                        format="YYYY-MM"
                     />
                 </div>
                 <MayoBtn
                     variant="primary"
                     size="sm"
                     color="blue"
-                    onClick={fetchData}
+                    onClick={() => fetchData()}
                     disabled={loading}
                     className="w-full"
                 >
@@ -269,10 +277,37 @@ export default function DashboardPage() {
 
                     {/* 차트 영역 */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                        {/* 방문자 수 바 차트 */}
+                        {/* 방문자 수 — 전국: 바 차트 / 특정 지역: 프로그레스 바 */}
                         <MayoCard variant="outlined" padding="md">
-                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>{displayTitle} — 방문자 수 (만명)</p>
-                            <div className={filterArea ? "slim-bar-chart" : ""}>
+                            <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>{displayTitle} — 방문자 수 {filterArea ? "" : "(만명)"}</p>
+                            {filterArea && selectedProfile ? (
+                                <div className="flex flex-col gap-4 py-2">
+                                    <VisitorProgressRow
+                                        label="총 방문자"
+                                        value={selectedProfile.totalVisitors}
+                                        max={selectedProfile.totalVisitors}
+                                        color="blue"
+                                    />
+                                    <VisitorProgressRow
+                                        label="현지인"
+                                        value={selectedProfile.localVisitors}
+                                        max={selectedProfile.totalVisitors}
+                                        color="green"
+                                    />
+                                    <VisitorProgressRow
+                                        label="외지인"
+                                        value={selectedProfile.outsiderVisitors}
+                                        max={selectedProfile.totalVisitors}
+                                        color="purple"
+                                    />
+                                    <VisitorProgressRow
+                                        label="외국인"
+                                        value={selectedProfile.foreignVisitors}
+                                        max={selectedProfile.totalVisitors}
+                                        color="red"
+                                    />
+                                </div>
+                            ) : (
                                 <MayoBarChart
                                     data={barData}
                                     series={[
@@ -284,7 +319,7 @@ export default function DashboardPage() {
                                     showGrid
                                     showLegend
                                 />
-                            </div>
+                            )}
                         </MayoCard>
 
                         {/* 외지인 비율 — 전국: 바 차트 / 특정 지역: 파이 차트 */}
@@ -466,6 +501,24 @@ function InsightRow({ emoji, text }: { emoji: string; text: string }) {
         <div className="flex items-start gap-2">
             <span className="shrink-0">{emoji}</span>
             <span>{text}</span>
+        </div>
+    );
+}
+
+function VisitorProgressRow({ label, value, max, color }: {
+    label: string;
+    value: number;
+    max: number;
+    color: "blue" | "green" | "purple" | "red";
+}) {
+    const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+    return (
+        <div>
+            <div className="flex justify-between items-center mb-1">
+                <span className="text-sm font-medium" style={{ color: "var(--mayo-text)" }}>{label}</span>
+                <span className="text-sm" style={{ color: "var(--mayo-text-muted)" }}>{fmtNum(value)}명 ({pct}%)</span>
+            </div>
+            <MayoProgress value={pct} max={100} color={color} size="md" />
         </div>
     );
 }
