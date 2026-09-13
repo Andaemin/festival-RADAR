@@ -61,11 +61,16 @@ function fmtNum(n: number): string {
     return n.toLocaleString();
 }
 
+/** 현지인·외지인이 모두 0이면 데이터 이상으로 판단 */
+function hasDataAnomaly(p: VisitorProfile): boolean {
+    return p.localVisitors === 0 && p.outsiderVisitors === 0 && p.totalVisitors > 0;
+}
+
 export default function DashboardPage() {
     const [filterArea, setFilterArea] = useState("");
     const [visitorDate, setVisitorDate] = useState(() => {
         const now = new Date();
-        const d = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     });
 
@@ -138,32 +143,38 @@ export default function DashboardPage() {
         ) ?? null;
     }, [profiles, filterArea, filteredLabel]);
 
+    // 이상 데이터 지역 목록
+    const anomalyRegions = useMemo(() => {
+        return new Set(profiles.filter(hasDataAnomaly).map((p) => p.regionLabel));
+    }, [profiles]);
+
     // 차트 데이터 — 전국 or 필터
     const barData = useMemo(() => {
         const src = filterArea ? filtered : [...profiles].sort((a, b) => b.totalVisitors - a.totalVisitors);
         return src.map((p) => ({
-            label: p.regionLabel,
+            label: anomalyRegions.has(p.regionLabel) ? `${p.regionLabel} ⚠` : p.regionLabel,
             총방문자: Math.round(p.totalVisitors / 1e4),
             외지인: Math.round(p.outsiderVisitors / 1e4),
             외국인: Math.round(p.foreignVisitors / 1e4),
         }));
-    }, [profiles, filtered, filterArea]);
+    }, [profiles, filtered, filterArea, anomalyRegions]);
 
     const ratioData = useMemo(() => {
         const src = filterArea ? filtered : [...profiles].sort((a, b) => b.outsiderRatio - a.outsiderRatio);
         return src.map((p) => ({
-            label: p.regionLabel,
+            label: anomalyRegions.has(p.regionLabel) ? `${p.regionLabel} ⚠` : p.regionLabel,
             외지인비율: Math.round(p.outsiderRatio * 1000) / 10,
         }));
-    }, [profiles, filtered, filterArea]);
+    }, [profiles, filtered, filterArea, anomalyRegions]);
 
     // 파이 차트 — 선택 지역 or 전국 Top 5
     const pieData = useMemo(() => {
         if (selectedProfile) {
+            const anomaly = hasDataAnomaly(selectedProfile);
             return [
-                { label: "현지인", value: selectedProfile.localVisitors, color: "#2e8af2" },
-                { label: "외지인", value: selectedProfile.outsiderVisitors, color: "#8b5cf6" },
-                { label: "외국인", value: selectedProfile.foreignVisitors, color: "#f97316" },
+                { label: "현지인", value: selectedProfile.localVisitors, color: anomaly ? "#fbbf24" : "#2e8af2" },
+                { label: "외지인", value: selectedProfile.outsiderVisitors, color: anomaly ? "#f59e0b" : "#8b5cf6" },
+                { label: "외국인", value: selectedProfile.foreignVisitors, color: anomaly ? "#d97706" : "#f97316" },
             ];
         }
         if (!profiles.length) return [];
@@ -301,23 +312,31 @@ export default function DashboardPage() {
                             <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>{displayTitle} — 방문자 수 {filterArea ? "" : "(만명)"}</p>
                             {filterArea && selectedProfile ? (
                                 <div className="flex flex-col gap-4 py-2">
+                                    {hasDataAnomaly(selectedProfile) && (
+                                        <MayoAlert type="warning" title="데이터 주의">
+                                            현지인·외지인 수치가 0으로, 해당 월 데이터가 불완전할 수 있습니다.
+                                        </MayoAlert>
+                                    )}
                                     <VisitorProgressRow
                                         label="총 방문자"
                                         value={selectedProfile.totalVisitors}
                                         max={selectedProfile.totalVisitors}
                                         color="blue"
+                                        warn={hasDataAnomaly(selectedProfile)}
                                     />
                                     <VisitorProgressRow
                                         label="현지인"
                                         value={selectedProfile.localVisitors}
                                         max={selectedProfile.totalVisitors}
                                         color="green"
+                                        warn={hasDataAnomaly(selectedProfile) && selectedProfile.localVisitors === 0}
                                     />
                                     <VisitorProgressRow
                                         label="외지인"
                                         value={selectedProfile.outsiderVisitors}
                                         max={selectedProfile.totalVisitors}
                                         color="purple"
+                                        warn={hasDataAnomaly(selectedProfile) && selectedProfile.outsiderVisitors === 0}
                                     />
                                     <VisitorProgressRow
                                         label="외국인"
@@ -378,15 +397,22 @@ export default function DashboardPage() {
                                     </div>
                                 </div>
                             ) : (
-                                <MayoBarChart
-                                    data={ratioData}
-                                    series={[
-                                        { key: "외지인비율", color: "#10b981", label: "외지인 비율(%)" },
-                                    ]}
-                                    height={340}
-                                    showGrid
-                                    showLegend
-                                />
+                                <>
+                                    <MayoBarChart
+                                        data={ratioData}
+                                        series={[
+                                            { key: "외지인비율", color: "#10b981", label: "외지인 비율(%)" },
+                                        ]}
+                                        height={340}
+                                        showGrid
+                                        showLegend
+                                    />
+                                    {anomalyRegions.size > 0 && (
+                                        <p className="text-xs mt-2" style={{ color: "#f59e0b" }}>
+                                            ⚠ 일부 지역({[...anomalyRegions].join(", ")})은 현지인·외지인 데이터가 0으로 비율이 부정확할 수 있습니다.
+                                        </p>
+                                    )}
+                                </>
                             )}
                         </MayoCard>
                     </div>
@@ -400,6 +426,11 @@ export default function DashboardPage() {
                             <div className="flex justify-center">
                                 <MayoPieChart data={pieData} size={200} showLegend />
                             </div>
+                            {selectedProfile && hasDataAnomaly(selectedProfile) && (
+                                <p className="text-xs mt-2" style={{ color: "#f59e0b" }}>
+                                    ⚠ 현지인·외지인 데이터가 0으로 구성 비율이 부정확할 수 있습니다.
+                                </p>
+                            )}
                         </MayoCard>
 
                         <MayoCard variant="outlined" padding="md">
@@ -462,21 +493,24 @@ export default function DashboardPage() {
                         <MayoTable
                             columns={[
                                 { key: "regionLabel", label: "시도", sortable: true },
-                                { key: "totalVisitors", label: "총 방문자", sortable: true, render: (v: unknown) => fmtNum(Number(v)) },
+                                { key: "totalVisitors", label: "총 방문자", sortable: true, render: (v: unknown, row: Record<string, unknown>) => {
+                                    const anomaly = Number(row.localVisitors) === 0 && Number(row.outsiderVisitors) === 0 && Number(v) > 0;
+                                    return <span style={anomaly ? { color: "#f59e0b" } : undefined}>{fmtNum(Number(v))}{anomaly ? " ⚠" : ""}</span>;
+                                }},
                                 { key: "localVisitors", label: "현지인", sortable: true, render: (v: unknown) => fmtNum(Number(v)) },
                                 { key: "outsiderVisitors", label: "외지인", sortable: true, render: (v: unknown) => fmtNum(Number(v)) },
                                 { key: "foreignVisitors", label: "외국인", sortable: true, render: (v: unknown) => fmtNum(Number(v)) },
                                 {
                                     key: "outsiderRatio",
-                                    label: "외지인 비율",
-                                    width: 130,
+                                    label: "외지인 비율 ⓘ",
+                                    width: 150,
                                     sortable: true,
                                     render: (v: unknown) => {
                                         const n = Number(v);
                                         const pct = (n * 100).toFixed(1);
                                         const color = n > 0.5 ? "purple" : n > 0.3 ? "blue" : "gray";
                                         return (
-                                            <div className="flex items-center gap-1">
+                                            <div className="flex items-center gap-1" title="(외지인 + 외국인) / 총 방문자">
                                                 <span>{pct}%</span>
                                                 <MayoTag color={color as "purple" | "blue" | "gray"} variant="soft" size="sm">
                                                     {n > 0.5 ? "높음" : n > 0.3 ? "보통" : "낮음"}
@@ -497,6 +531,9 @@ export default function DashboardPage() {
                             striped
                             bordered
                         />
+                        <p className="text-xs mt-2" style={{ color: "var(--mayo-text-muted)" }}>
+                            ⓘ 외지인 비율 = (외지인 + 외국인) / 총 방문자. 외지인과 외국인을 합산한 외부 유입 비율입니다.
+                        </p>
                     </MayoCard>
                 </>
             )}
@@ -577,20 +614,34 @@ function ComparisonRow({ label, ratio, color }: { label: string; ratio: number; 
     );
 }
 
-function VisitorProgressRow({ label, value, max, color }: {
+function VisitorProgressRow({ label, value, max, color, warn }: {
     label: string;
     value: number;
     max: number;
     color: "blue" | "green" | "purple" | "red";
+    warn?: boolean;
 }) {
     const pct = max > 0 ? Math.round((value / max) * 100) : 0;
     return (
         <div>
             <div className="flex justify-between items-center mb-1">
-                <span className="text-sm font-medium" style={{ color: "var(--mayo-text)" }}>{label}</span>
-                <span className="text-sm" style={{ color: "var(--mayo-text-muted)" }}>{fmtNum(value)}명 ({pct}%)</span>
+                <span className="text-sm font-medium" style={{ color: warn ? "#f59e0b" : "var(--mayo-text)" }}>
+                    {label}{warn ? " ⚠" : ""}
+                </span>
+                <span className="text-sm" style={{ color: warn ? "#f59e0b" : "var(--mayo-text-muted)" }}>
+                    {fmtNum(value)}명 ({pct}%)
+                </span>
             </div>
-            <MayoProgress value={pct} max={100} color={color} size="md" />
+            {warn ? (
+                <div className="w-full h-2.5 rounded-full" style={{ background: "var(--mayo-bg-subtle)" }}>
+                    <div
+                        className="h-full rounded-full"
+                        style={{ width: `${Math.max(pct, 2)}%`, background: "#f59e0b" }}
+                    />
+                </div>
+            ) : (
+                <MayoProgress value={pct} max={100} color={color} size="md" />
+            )}
         </div>
     );
 }
