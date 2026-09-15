@@ -253,17 +253,18 @@ export default function BudgetScatter({
                             label: `축제별 예산 효율 상세 (${scatter.length}건)`,
                             children: (
                                 <MayoTable
+                                    // BudgetDetailTable과 동일한 열 폭/nowrap 규칙(아래 참고).
                                     columns={[
-                                        { key: "rank", label: "#", width: 30 },
-                                        { key: "festivalName", label: "축제명", sortable: true },
-                                        { key: "totalBudgetKrw", label: "예산", width: 80, sortable: true, render: (v: unknown) => krw(Number(v)) },
-                                        { key: "visitors", label: "방문객", width: 80, sortable: true, render: (v: unknown) => { const n = Number(v); return n >= 10000 ? `${Math.round(n / 10000).toLocaleString()}만명` : `${n.toLocaleString()}명`; } },
+                                        { key: "rank", label: "#", width: 48 },
+                                        { key: "festivalName", label: "축제명", sortable: true, render: (v: unknown) => <span className="block min-w-[8rem]">{String(v)}</span> },
+                                        { key: "totalBudgetKrw", label: "예산", width: 112, sortable: true, render: (v: unknown) => <span className="whitespace-nowrap tabular-nums">{krw(Number(v))}</span> },
+                                        { key: "visitors", label: "방문객", width: 104, sortable: true, render: (v: unknown) => { const n = Number(v); return <span className="whitespace-nowrap tabular-nums">{n >= 10000 ? `${Math.round(n / 10000).toLocaleString()}만명` : `${n.toLocaleString()}명`}</span>; } },
                                         {
-                                            key: "costPerVisitorKrw", label: "1인당", width: 140, sortable: true,
+                                            key: "costPerVisitorKrw", label: "1인당", width: 176, sortable: true,
                                             render: (v: unknown) => {
                                                 const n = Number(v);
                                                 const grade = efficiencyGrade(n, median);
-                                                return (<div className="flex items-center gap-1 whitespace-nowrap"><span>{krw(n)}</span><MayoTag color={grade.color} variant="soft" size="sm">{grade.label}</MayoTag></div>);
+                                                return (<div className="flex items-center gap-1.5 whitespace-nowrap"><span className="tabular-nums">{krw(n)}</span><MayoTag color={grade.color} variant="soft" size="sm">{grade.label}</MayoTag></div>);
                                             },
                                         },
                                     ]}
@@ -287,16 +288,18 @@ export default function BudgetScatter({
             >
                 {modalBin !== null && modalItems.length > 0 && (
                     <MayoTable
+                        // BudgetDetailTable과 동일한 열 폭/nowrap 규칙. 다이얼로그(lg=640px)가 좁은 화면에서
+                        // 줄어들면 표는 .mayo-table-wrapper의 가로 스크롤로 받아낸다.
                         columns={[
-                            { key: "festivalName", label: "축제명", sortable: true },
-                            { key: "totalBudgetKrw", label: "예산", width: 90, sortable: true, render: (v: unknown) => krw(Number(v)) },
-                            { key: "visitors", label: "방문객", width: 90, sortable: true, render: (v: unknown) => { const n = Number(v); return n >= 10000 ? `${Math.round(n / 10000).toLocaleString()}만명` : `${n.toLocaleString()}명`; } },
+                            { key: "festivalName", label: "축제명", sortable: true, render: (v: unknown) => <span className="block min-w-[8rem]">{String(v)}</span> },
+                            { key: "totalBudgetKrw", label: "예산", width: 112, sortable: true, render: (v: unknown) => <span className="whitespace-nowrap tabular-nums">{krw(Number(v))}</span> },
+                            { key: "visitors", label: "방문객", width: 104, sortable: true, render: (v: unknown) => { const n = Number(v); return <span className="whitespace-nowrap tabular-nums">{n >= 10000 ? `${Math.round(n / 10000).toLocaleString()}만명` : `${n.toLocaleString()}명`}</span>; } },
                             {
-                                key: "costPerVisitorKrw", label: "1인당 비용", width: 160, sortable: true,
+                                key: "costPerVisitorKrw", label: "1인당 비용", width: 176, sortable: true,
                                 render: (v: unknown) => {
                                     const n = Number(v);
                                     const grade = efficiencyGrade(n, median);
-                                    return (<div className="flex items-center gap-1 whitespace-nowrap"><span>{krw(n)}</span><MayoTag color={grade.color} variant="soft" size="sm">{grade.label}</MayoTag></div>);
+                                    return (<div className="flex items-center gap-1.5 whitespace-nowrap"><span className="tabular-nums">{krw(n)}</span><MayoTag color={grade.color} variant="soft" size="sm">{grade.label}</MayoTag></div>);
                                 },
                             },
                         ]}
@@ -343,17 +346,20 @@ export function BudgetDetailTable({
                 label: `축제별 예산 효율 상세 (${scatter.length}건)`,
                 children: (
                     <MayoTable
+                        // 숫자 열은 줄바꿈을 막고(nowrap) 값이 다 들어갈 만큼 폭을 준다. 셀 padding이 좌우 16px씩이라
+                        // width에 그만큼 여유가 필요하다. 축제명 열만 가변 폭으로 남기되 최소 폭을 둬서, 화면이 좁아지면
+                        // 행이 세로로 늘어나는 대신 .mayo-table-wrapper(overflow-x:auto)가 가로 스크롤로 받아낸다.
                         columns={[
-                            { key: "rank", label: "#", width: 30 },
-                            { key: "festivalName", label: "축제명", sortable: true },
-                            { key: "totalBudgetKrw", label: "예산", width: 80, sortable: true, render: (v: unknown) => krw(Number(v)) },
-                            { key: "visitors", label: "방문객", width: 80, sortable: true, render: (v: unknown) => { const n = Number(v); return n >= 10000 ? `${Math.round(n / 10000).toLocaleString()}만명` : `${n.toLocaleString()}명`; } },
+                            { key: "rank", label: "#", width: 48 },
+                            { key: "festivalName", label: "축제명", sortable: true, render: (v: unknown) => <span className="block min-w-[8rem]">{String(v)}</span> },
+                            { key: "totalBudgetKrw", label: "예산", width: 112, sortable: true, render: (v: unknown) => <span className="whitespace-nowrap tabular-nums">{krw(Number(v))}</span> },
+                            { key: "visitors", label: "방문객", width: 104, sortable: true, render: (v: unknown) => { const n = Number(v); return <span className="whitespace-nowrap tabular-nums">{n >= 10000 ? `${Math.round(n / 10000).toLocaleString()}만명` : `${n.toLocaleString()}명`}</span>; } },
                             {
-                                key: "costPerVisitorKrw", label: "1인당", width: 110, sortable: true,
+                                key: "costPerVisitorKrw", label: "1인당", width: 176, sortable: true,
                                 render: (v: unknown) => {
                                     const n = Number(v);
                                     const grade = efficiencyGrade(n, median);
-                                    return (<div className="flex items-center gap-1"><span>{krw(n)}</span><MayoTag color={grade.color} variant="soft" size="sm">{grade.label}</MayoTag></div>);
+                                    return (<div className="flex items-center gap-1.5 whitespace-nowrap"><span className="tabular-nums">{krw(n)}</span><MayoTag color={grade.color} variant="soft" size="sm">{grade.label}</MayoTag></div>);
                                 },
                             },
                         ]}

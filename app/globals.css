@@ -45,6 +45,22 @@ body {
   font-family: "TossFace", var(--font-pretendard), Arial, Helvetica, sans-serif !important;
 }
 
+/* MayoDialog — 브라우저 기본 <dialog> 스타일(overflow:auto)이 다이얼로그 자체를 스크롤시켜
+   스크롤바가 border-radius 안쪽 우측 모서리를 네모나게 덮는다. 스크롤을 본문(__body)으로 옮겨
+   모서리를 살리고, 제목/닫기 버튼/푸터는 스크롤과 무관하게 항상 보이게 한다. */
+.mayo-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: calc(100vh - 2rem);
+  max-width: calc(100vw - 2rem);
+}
+.mayo-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* MayoAlert 아이콘에 TossFace 명시 적용 */
 .mayo-alert__icon {
   font-family: "TossFace", "Apple Color Emoji", "Segoe UI Emoji", sans-serif !important;
