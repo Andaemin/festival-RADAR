@@ -11,8 +11,7 @@
  */
 import "dotenv/config";
 import * as path from "path";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "../lib/generated/prisma";
+import { createScriptPrisma } from "./lib/create-prisma";
 import { runAcceptanceChecks, printAcceptanceChecks } from "./multiyear-import/acceptance";
 import { canonicalizeRow, CanonicalRecord, RowIssue } from "./multiyear-import/canonicalize";
 import { DEFAULT_CSV_PATH, IMPORTER_VERSION } from "./multiyear-import/constants";
@@ -93,7 +92,7 @@ async function main() {
     process.exit(1);
   }
 
-  const prisma = new PrismaClient({ adapter: new PrismaMariaDb(process.env.DATABASE_URL!) });
+  const prisma = createScriptPrisma();
   try {
     // persist는 원본 파일이 바뀌면(canonicalDatasetSha256가 달라지면) 기존 행을 지우지 않고
     // 새 batch로 **덧쌓는다**. 원본 CSV를 교체할 때 이 단계를 건너뛰면 같은 축제가 두 벌로 남고,

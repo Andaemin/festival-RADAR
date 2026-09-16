@@ -15,8 +15,7 @@
  * 실행: npx tsx scripts/seed-multiyear-publication-status.ts
  */
 import "dotenv/config";
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "../lib/generated/prisma";
+import { createScriptPrisma } from "./lib/create-prisma";
 
 /** Spring festival_budget.multi_year_dataset_publication_status에서 그대로 이관한 값
  *  (2026-08-08 Spring 운영자가 PUBLISHED_PLAN_COMPLETE로 표시한 시각). */
@@ -26,7 +25,7 @@ const SPRING_REFERENCE_PUBLICATION_STATE: { datasetYear: number; publishedAt: st
 ];
 
 async function main() {
-  const prisma = new PrismaClient({ adapter: new PrismaMariaDb(process.env.DATABASE_URL!) });
+  const prisma = createScriptPrisma();
   try {
     for (const entry of SPRING_REFERENCE_PUBLICATION_STATE) {
       const saved = await prisma.multiYearDatasetPublicationStatus.upsert({

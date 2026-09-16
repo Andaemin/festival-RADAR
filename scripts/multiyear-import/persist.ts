@@ -119,7 +119,7 @@ export async function persistMultiYearRecords(params: PersistParams): Promise<Pe
 
         return batch.id;
       },
-      { timeout: 120_000 }
+      { timeout: 600_000 }
     );
 
     console.log(`[${datasetYear}] 완료 (batchId=${batchId}, ${yearRecords.length}건)`);
