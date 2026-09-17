@@ -104,19 +104,14 @@ body {
   font-size: 10px !important;
 }
 
-/* 라인 차트 SVG overflow 제한 */
-.mayo-line-chart svg {
-  overflow: hidden !important;
-}
-
 /* ─── 모바일 차트/테이블 반응형 ─── */
 @media (max-width: 768px) {
   .mayo-chart__axis-label[text-anchor="middle"] {
     font-size: 8px !important;
     transform: rotate(-35deg) translateY(8px) !important;
   }
-  /* 라인 차트(일별 집중률 추이 등) X축 라벨 모바일에서 숨김 */
-  .mayo-line-chart .mayo-chart__axis-label[text-anchor="middle"] {
+  /* 일별 집중률 추이 라인 차트 X축 라벨 모바일에서 숨김 */
+  .daily-line-chart .mayo-chart__axis-label[text-anchor="middle"] {
     display: none !important;
   }
   /* 범례 모바일 크기 */

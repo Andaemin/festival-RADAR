@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import {
     MayoBtn,
     MayoSelect,
@@ -313,16 +313,32 @@ export default function PlannerPage() {
         label: v.displayName,
     }));
 
-    // opportunity score chart data for recommendations
-    const opportunityChartData = result
-        ? result.recommendations
-            .filter((r) => r.kind !== "BUDGET_EFFICIENCY" && r.opportunityScore > 0)
-            .sort((a, b) => b.opportunityScore - a.opportunityScore)
-            .map((r) => ({
-                label: r.title.length > 6 ? r.title.slice(0, 5) + "…" : r.title,
-                점수: r.opportunityScore,
-            }))
-        : [];
+    // opportunity score chart data — 전체 이름 유지 (툴팁용)
+    const opportunityChartData = useMemo(() =>
+        result
+            ? result.recommendations
+                .filter((r) => r.kind !== "BUDGET_EFFICIENCY" && r.opportunityScore > 0)
+                .sort((a, b) => b.opportunityScore - a.opportunityScore)
+                .map((r) => ({ label: r.title, 점수: r.opportunityScore }))
+            : [],
+        [result],
+    );
+
+    // X축 라벨만 DOM에서 잘라내기 (툴팁은 전체 이름 유지)
+    const oppChartRef = useRef<HTMLDivElement>(null);
+    const truncateOppLabels = useCallback(() => {
+        if (!oppChartRef.current) return;
+        oppChartRef.current
+            .querySelectorAll<SVGTextElement>('.mayo-chart__axis-label[text-anchor="middle"]')
+            .forEach((el) => {
+                const full = el.getAttribute("data-full") ?? el.textContent ?? "";
+                if (!el.getAttribute("data-full")) el.setAttribute("data-full", full);
+                el.textContent = full.length > 6 ? full.slice(0, 5) + "…" : full;
+            });
+    }, []);
+    useEffect(() => {
+        truncateOppLabels();
+    }, [opportunityChartData, truncateOppLabels]);
 
     return (
         <main className="min-h-screen flex flex-col p-3 sm:p-4 lg:p-5 gap-3 sm:gap-4" style={{ background: "var(--mayo-bg-subtle)", color: "var(--mayo-text)" }}>
@@ -513,7 +529,7 @@ export default function PlannerPage() {
                         {opportunityChartData.length > 0 && (
                             <MayoCard variant="outlined" padding="md">
                                 <p className="text-sm font-semibold mb-2" style={{ color: "var(--mayo-text)" }}>기회 점수 비교</p>
-                                <div className="slim-bar-chart">
+                                <div className="slim-bar-chart" ref={oppChartRef} onMouseOver={truncateOppLabels}>
                                     <MayoBarChart
                                         data={opportunityChartData}
                                         series={[{ key: "점수", color: "#10b981", label: "기회 점수" }]}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
     MayoSelect,
     MayoBtn,
@@ -296,14 +296,30 @@ export default function ConcentrationPage() {
         return { avg, max, min, maxItem, attractionCount: attractions.length, days: items.length };
     }, [items, attractions]);
 
-    // 관광지별 바 차트 (평균 집중률 상위 10개)
+    // 관광지별 바 차트 (평균 집중률 상위 10개) — 전체 이름 유지 (툴팁용)
     const attractionBarData = useMemo(() => {
         return attractionAvg.slice(0, 10).map((a) => ({
-            label: a.name.length > 6 ? a.name.slice(0, 5) + "…" : a.name,
+            label: a.name,
             평균: Math.round(a.avg * 10) / 10,
             최대: Math.round(a.max * 10) / 10,
         }));
     }, [attractionAvg]);
+
+    // X축 라벨만 DOM에서 잘라내기 (툴팁은 전체 이름 유지)
+    const attrChartRef = useRef<HTMLDivElement>(null);
+    const truncateAxisLabels = useCallback(() => {
+        if (!attrChartRef.current) return;
+        attrChartRef.current
+            .querySelectorAll<SVGTextElement>('.mayo-chart__axis-label[text-anchor="middle"]')
+            .forEach((el) => {
+                const full = el.getAttribute("data-full") ?? el.textContent ?? "";
+                if (!el.getAttribute("data-full")) el.setAttribute("data-full", full);
+                el.textContent = full.length > 6 ? full.slice(0, 5) + "…" : full;
+            });
+    }, []);
+    useEffect(() => {
+        truncateAxisLabels();
+    }, [attractionBarData, truncateAxisLabels]);
 
     // 테이블 데이터
     const tableData = useMemo(() => {
@@ -429,6 +445,7 @@ export default function ConcentrationPage() {
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                         {/* 일별 추이 라인 차트 */}
                         <MayoCard variant="outlined" padding="md">
+                            <div className="daily-line-chart">
                             <MayoLineChart
                                 title={`${selectedAttraction} 일별 집중률 추이`}
                                 data={dailyAvg}
@@ -438,22 +455,25 @@ export default function ConcentrationPage() {
                                 showLegend
                                 showDots
                             />
+                            </div>
                         </MayoCard>
 
                         {/* 관광지별 평균 집중률 바 차트 (상위 10개) */}
                         {attractionBarData.length > 0 && (
                             <MayoCard variant="outlined" padding="md">
-                                <MayoBarChart
-                                    title="관광지별 집중률 비교 (상위 10)"
-                                    data={attractionBarData}
-                                    series={[
-                                        { key: "평균", color: "#2e8af2", label: "평균(%)" },
-                                        { key: "최대", color: "#f97316", label: "최대(%)" },
-                                    ]}
-                                    height={280}
-                                    showGrid
-                                    showLegend
-                                />
+                                <div ref={attrChartRef} onMouseOver={truncateAxisLabels}>
+                                    <MayoBarChart
+                                        title="관광지별 집중률 비교 (상위 10)"
+                                        data={attractionBarData}
+                                        series={[
+                                            { key: "평균", color: "#2e8af2", label: "평균(%)" },
+                                            { key: "최대", color: "#f97316", label: "최대(%)" },
+                                        ]}
+                                        height={280}
+                                        showGrid
+                                        showLegend
+                                    />
+                                </div>
                             </MayoCard>
                         )}
                     </div>
