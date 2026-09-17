@@ -103,11 +103,13 @@ const DISTRICT_SHAPE = /^[가-힣]+[시군구]$|^[가-힣]+시 [가-힣]+구$/;
  * 원본의 오타("김친시", "에산군")까지 고쳐주지는 않는다. 지어낸 교정은 더 위험하다.
  */
 export async function loadDistrictsByRegion(): Promise<Record<string, string[]>> {
-    const rows = await prisma.multiYearFestivalRecord.findMany({
-        where: { region: { not: null }, district: { not: null } },
-        select: { region: true, district: true },
-        distinct: ["region", "district"],
-    });
+    // Prisma의 `distinct`는 DB가 아니라 클라이언트 메모리에서 중복을 걷어내므로 원장 전 행을
+    // 끌어온다. 시군구 조합은 수백 개뿐이라 DB의 DISTINCT로 직접 줄여서 가져온다.
+    const rows = await prisma.$queryRaw<{ region: string; district: string }[]>`
+        SELECT DISTINCT region, district
+        FROM multi_year_festival_record
+        WHERE region IS NOT NULL AND district IS NOT NULL
+    `;
 
     const byRegion: Record<string, Set<string>> = {};
     for (const r of rows) {

@@ -17,6 +17,6 @@ function createPrismaClient() {
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
-if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = prisma;
-}
+// dev에서는 HMR로 모듈이 다시 평가될 때 커넥션이 늘어나는 걸 막고, production(Vercel
+// 서버리스)에서는 warm 인스턴스가 살아있는 동안 요청마다 새 커넥션을 맺지 않도록 항상 재사용한다.
+globalForPrisma.prisma = prisma;
