@@ -698,7 +698,7 @@ function DataSourcesFooter() {
                 </div>
                 <div>
                     <a
-                        href="https://kosis.kr/visual/nsportalStats/detailContents.do?listId=F&statJipyoId=3698&vStatJipyoId=4991"
+                        href="https://kosis.kr/statHtml/statHtml.do?sso=ok&returnurl=https%3A%2F%2Fkosis.kr%3A443%2FstatHtml%2FstatHtml.do%3FdocId%3D8397%26markType%3DM%26tblId%3DDT_1J22003%26orgId%3D101%26"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm font-semibold hover:underline"
