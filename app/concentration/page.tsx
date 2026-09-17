@@ -299,7 +299,7 @@ export default function ConcentrationPage() {
     // 관광지별 바 차트 (평균 집중률 상위 10개)
     const attractionBarData = useMemo(() => {
         return attractionAvg.slice(0, 10).map((a) => ({
-            label: a.name.length > 8 ? a.name.slice(0, 7) + "…" : a.name,
+            label: a.name.length > 6 ? a.name.slice(0, 5) + "…" : a.name,
             평균: Math.round(a.avg * 10) / 10,
             최대: Math.round(a.max * 10) / 10,
         }));
@@ -465,12 +465,12 @@ export default function ConcentrationPage() {
                         </p>
                         <MayoTable
                             columns={[
-                                { key: "rank", label: "순위", width: 60, sortable: true },
+                                { key: "rank", label: "#", width: 40, sortable: true },
                                 { key: "name", label: "관광지명", sortable: true },
                                 {
                                     key: "avg",
-                                    label: "평균 집중률(%)",
-                                    width: 150,
+                                    label: "평균(%)",
+                                    width: 120,
                                     sortable: true,
                                     render: (val: unknown) => {
                                         const num = typeof val === "string" ? parseFloat(val) : Number(val);
@@ -483,9 +483,9 @@ export default function ConcentrationPage() {
                                         );
                                     },
                                 },
-                                { key: "max", label: "최대(%)", width: 100, sortable: true },
-                                { key: "min", label: "최소(%)", width: 100, sortable: true },
-                                { key: "days", label: "예측일수", width: 90, sortable: true },
+                                { key: "max", label: "최대(%)", width: 80, sortable: true },
+                                { key: "min", label: "최소(%)", width: 80, sortable: true },
+                                { key: "days", label: "일수", width: 60, sortable: true },
                             ]}
                             data={tableData as unknown as Record<string, unknown>[]}
                             rowKey="name"

@@ -49,28 +49,28 @@ export default function AppSidebar() {
                 <span className="text-sm font-bold" style={{ color: "var(--mayo-text)" }}>Festival Radar</span>
                 <button
                     onClick={() => setOpen((v) => !v)}
-                    className="flex flex-col justify-center items-center w-8 h-8 gap-1"
+                    className="flex flex-col justify-center items-center w-8 h-8 gap-[5px]"
                     aria-label="메뉴 열기"
                 >
                     <span
-                        className="block w-5 h-0.5 rounded transition-transform"
+                        className="block w-5 h-0.5 rounded transition-transform duration-200"
                         style={{
                             background: "var(--mayo-text)",
-                            transform: open ? "rotate(45deg) translateY(3px)" : "none",
+                            transform: open ? "rotate(45deg) translateY(3.5px)" : "none",
                         }}
                     />
                     <span
-                        className="block w-5 h-0.5 rounded transition-opacity"
+                        className="block w-5 h-0.5 rounded transition-opacity duration-200"
                         style={{
                             background: "var(--mayo-text)",
                             opacity: open ? 0 : 1,
                         }}
                     />
                     <span
-                        className="block w-5 h-0.5 rounded transition-transform"
+                        className="block w-5 h-0.5 rounded transition-transform duration-200"
                         style={{
                             background: "var(--mayo-text)",
-                            transform: open ? "rotate(-45deg) translateY(-3px)" : "none",
+                            transform: open ? "rotate(-45deg) translateY(-3.5px)" : "none",
                         }}
                     />
                 </button>

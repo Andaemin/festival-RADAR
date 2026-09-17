@@ -155,7 +155,7 @@ function ReferenceTable({
     return (
         <div className="mt-3">
             <p className="text-xs font-medium mb-2" style={{ color: "var(--mayo-text-muted)" }}>근거 축제 (실제 데이터)</p>
-            <div className="overflow-x-auto" style={{ minWidth: 520 }}>
+            <div className="overflow-x-auto">
                 <MayoTable<RefRow>
                     columns={columns}
                     data={tableData}
@@ -319,7 +319,7 @@ export default function PlannerPage() {
             .filter((r) => r.kind !== "BUDGET_EFFICIENCY" && r.opportunityScore > 0)
             .sort((a, b) => b.opportunityScore - a.opportunityScore)
             .map((r) => ({
-                label: r.title.length > 8 ? r.title.slice(0, 7) + "…" : r.title,
+                label: r.title.length > 6 ? r.title.slice(0, 5) + "…" : r.title,
                 점수: r.opportunityScore,
             }))
         : [];

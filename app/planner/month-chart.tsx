@@ -121,7 +121,9 @@ export default function MonthChart({
     }
 
     const barData = distribution.map((d) => {
-        const label = `${d.month}월${d.month === targetMonth ? "(희망)" : ""}${d.month === recommendedMonth ? "(추천)" : ""}`;
+        let label = `${d.month}월`;
+        if (d.month === targetMonth) label += "\n희망";
+        else if (d.month === recommendedMonth) label += "\n추천";
         return {
             label,
             [`${regionLabel} ${typeLabel}`]: d.regionSameTypeCount,
