@@ -892,6 +892,14 @@ function ResultPane({
                 <MetricBox label="추정 방식" value={isSeries ? "SERIES" : "PEER"} sub={ESTIMATE_BASIS_LABEL[result.estimateBasis]} />
                 <MetricBox label="신뢰도" value={RELIABILITY_LABEL[result.reliabilityTier] ?? result.reliabilityTier} reliabilityColor={RELIABILITY_BADGE_COLOR[result.reliabilityTier]} />
             </div>
+            {/* Feature: 예산 추정 분석 신뢰성 점검 — STEP 3(§5). 위 금액이 "계획예산 추정치"이지
+                "실제 집행액"이 아니라는 점을 화면에서 한 번도 명시하지 않았던 gap을 보완한다
+                (docs/budget-algorithm-final.md §1 원칙을 UI에도 그대로 옮긴 것 - 새 정책이 아님).
+                Series/Peer 공통이라 Row 1 바로 아래 한 곳에서만 표시하고 다른 카드에서 반복하지
+                않는다. */}
+            <p className="text-[11px] -mt-1" style={{ color: "var(--mayo-text-muted)" }}>
+                위 금액은 공개된 지역축제 개최 계획 자료를 기반으로 한 계획예산 추정치입니다 — 실제 집행액이 아닙니다.
+            </p>
 
             {/* Row 2: 차트 3개 — Peer분포 바차트 + 연도별 비중 바차트 + 추정방식/신뢰도 도넛 */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1245,6 +1253,14 @@ function RecommendationCheckCard({ result }: { result: MultiYearBudgetEstimateRe
 function ReliabilityCard({ result }: { result: MultiYearBudgetEstimateResponse }) {
     const tier = result.reliabilityTier;
     const isLow = tier === "LOW";
+    // Feature: 예산 추정 분석 신뢰성 점검 — STEP 5(§7). result.reliabilityDiagnostic.reasonKey는
+    // 이미 API가 "단일 이력이라 변동성 측정 자체가 불가능했던 HIGH"와 "실제로 변동을 측정해서
+    // 안정적이었던 HIGH"를 구분해 내려주지만(reliability.ts SERIES_STABLE_SINGLE_HISTORY), 지금까지
+    // 화면에서는 접힌 "분석적 표시" 안에서만 reasonKey 코드값으로 노출됐다 - 눈에 띄는 요약
+    // 문장에서는 두 경우가 똑같은 RELIABILITY_MEANING.HIGH 한 줄로만 보였다("response에 있으나
+    // UI에서 미활용" 케이스). tier/reasonKey 판정 자체는 전혀 재계산하지 않고 이미 계산된 값만
+    // 읽는다 - 새 문구는 reliabilityReason과 모순되지 않는 범위에서만 보충 설명으로 추가한다.
+    const isSingleHistoryHigh = tier === "HIGH" && result.reliabilityDiagnostic?.reasonKey === "SERIES_STABLE_SINGLE_HISTORY";
 
     return (
         <Card title="신뢰도">
@@ -1255,6 +1271,11 @@ function ReliabilityCard({ result }: { result: MultiYearBudgetEstimateResponse }
             </div>
 
             <p className="text-sm" style={{ color: "var(--mayo-text)" }}>{RELIABILITY_MEANING[tier] ?? ""}</p>
+            {isSingleHistoryHigh && (
+                <p className="text-xs mt-1" style={{ color: "var(--mayo-text-secondary)" }}>
+                    동일 축제의 과거 계획예산 1건을 활용했습니다. 연도 간 변동성은 확인할 수 없습니다.
+                </p>
+            )}
             <p className="text-xs mt-1.5" style={{ color: "var(--mayo-text-muted)" }}>
                 API 근거 문구(reliabilityReason): <span style={{ color: "var(--mayo-text-secondary)" }}>&ldquo;{result.reliabilityReason}&rdquo;</span>
             </p>
@@ -1641,6 +1662,25 @@ function FutureYearSafetyCard({ result }: { result: MultiYearBudgetEstimateRespo
         return null;
     }
     const cpiFullyAvailable = result.seriesHistoryDetail?.cpiFullyAvailable ?? null;
+    // Feature: 예산 추정 분석 신뢰성 점검 — STEP 6(§8). result.cpiSourceDiagnostic는
+    // Series MATCHED일 때 이미 API가 채워 내려주지만(KOSIS 연동인지 내장 대체 데이터인지)
+    // 지금까지 이 페이지 어디에서도 읽지 않았다 - "response에 데이터가 있으나 UI에서 미활용"
+    // 케이스. API가 실제로 내려준 값만 그대로 표시하고, source를 추측해서 만들어내지 않는다
+    // (cpiSourceDiagnostic이 null이면 "—"로만 표시). 문구는 "실시간 조회"처럼 매 요청마다
+    // 새로 조회하는 것으로 오해할 수 있는 표현 대신, 실제로 24시간 캐시를 쓰는 동작과 맞는
+    // "KOSIS 연동"/"내장(대체 데이터)"으로 표현한다(계산/판정 로직 변경 없음, 문구만 수정).
+    // "물가 보정 기준연도"는 새 데이터가 아니라 기존에 이미 문서화된 고정 공식(planningYear-1,
+    // cpi.ts의 tryAdjustForCpi)을 그대로 노출할 뿐이다 - CPI 미적용(nominal) 상태에서는
+    // 기준연도 자체가 무의미하므로 표시하지 않는다. cpiFullyAvailable(=Series own-history 계산에
+    // 실제로 CPI가 전부 적용됐는지)이 true일 때만 이 두 row를 붙이므로, Peer(이 카드 자체가
+    // seriesSignal.status==="MATCHED"가 아니면 렌더되지 않음)나 nominal fallback에는 절대
+    // 나타나지 않는다.
+    const cpiSourceLabel =
+        result.cpiSourceDiagnostic === null
+            ? "—"
+            : result.cpiSourceDiagnostic.source === "KOSIS"
+                ? "KOSIS 연동 소비자물가지수"
+                : "내장 소비자물가지수(대체 데이터)";
 
     return (
         <Card title="Future-year 진단">
@@ -1658,6 +1698,12 @@ function FutureYearSafetyCard({ result }: { result: MultiYearBudgetEstimateRespo
                                 ? "CPI 보정 적용"
                                 : "미래/미지원 연도라 CPI 보정 없이 명목(nominal) 예산 기준",
                     ],
+                    ...(cpiFullyAvailable
+                        ? ([
+                              ["CPI 출처", cpiSourceLabel],
+                              ["물가 보정 기준연도", `${result.planningYear - 1}년`],
+                          ] as [string, string][])
+                        : []),
                 ]}
             />
             <p className="text-[10px] mt-2" style={{ color: "var(--mayo-text-muted)" }}>
