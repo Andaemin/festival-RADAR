@@ -664,7 +664,56 @@ export default function BudgetEstimatorPage() {
                     { value: "reliability", label: "전체 Reliability 감사 (G0 이후 재검증, leakage-safe backtest)", children: <LazyAuditSection><GlobalReliabilityAuditInner /></LazyAuditSection> },
                 ]}
             />
+
+            <DataSourcesFooter />
         </main>
+    );
+}
+
+/**
+ * Feature: 예산추정 페이지 하단 데이터 출처 표기. 계산 로직에는 전혀 관여하지 않는 순수 표시용
+ * footer다 - 항상(계산 전/후 무관) 페이지 최하단에 표시하고, 예산 결과 카드/시뮬레이션 카드와는
+ * 시각적으로 분리한다(같은 강조도로 섞지 않음 - 얇은 상단 구분선 + 옅은 텍스트만 사용).
+ *
+ * 링크는 API key가 없는 공식 기관 홈페이지만 쓴다(§6) - KOSIS 실제 조회 URL(lib/inflation/
+ * kosis-cpi-provider.ts)은 절대 여기 노출하지 않는다.
+ */
+function DataSourcesFooter() {
+    return (
+        <footer className="mt-2 pt-4" style={{ borderTop: "1px solid var(--mayo-border)" }}>
+            <p className="text-xs font-semibold mb-3" style={{ color: "var(--mayo-text-muted)" }}>데이터 출처</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <a
+                        href="https://www.mcst.go.kr/site/s_culture/festival/festivalCalList.jsp"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-semibold hover:underline"
+                        style={{ color: "var(--mayo-text)" }}
+                    >
+                        문화체육관광부
+                    </a>
+                    <p className="text-xs mt-1" style={{ color: "var(--mayo-text-secondary)" }}>연도별 지역축제 정보 및 지역축제 개최 계획 자료</p>
+                    <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>축제 기본정보, 개최기간, 계획예산 등 다년도 축제 분석 데이터로 활용합니다.</p>
+                </div>
+                <div>
+                    <a
+                        href="https://kosis.kr/statHtml/statHtml.do?sso=ok&returnurl=https%3A%2F%2Fkosis.kr%3A443%2FstatHtml%2FstatHtml.do%3FdocId%3D8397%26markType%3DM%26tblId%3DDT_1J22003%26orgId%3D101%26"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-semibold hover:underline"
+                        style={{ color: "var(--mayo-text)" }}
+                    >
+                        KOSIS 국가통계포털
+                    </a>
+                    <p className="text-xs mt-1" style={{ color: "var(--mayo-text-secondary)" }}>소비자물가지수(총지수, 2020=100)</p>
+                    <p className="text-xs" style={{ color: "var(--mayo-text-muted)" }}>동일 축제의 과거 예산을 계획연도 기준의 화폐가치로 비교하기 위한 물가 보정에 활용합니다.</p>
+                </div>
+            </div>
+            <p className="text-[11px] mt-4 italic" style={{ color: "var(--mayo-text-muted)" }}>
+                본 서비스의 예산 추정 및 추천 결과는 공공데이터를 기반으로 제공되는 기획·의사결정 참고자료입니다.
+            </p>
+        </footer>
     );
 }
 
