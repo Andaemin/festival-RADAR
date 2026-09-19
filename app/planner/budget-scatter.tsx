@@ -13,8 +13,11 @@ const H = 240;
 const PAD = { top: 20, right: 16, bottom: 32, left: 32 };
 
 // 구간별 색상: 효율적(녹색) → 평균(파란) → 비효율(주황/빨강)
-function binColor(binMid: number, median: number): string {
-    const ratio = binMid / median;
+// 로그 10구간은 막대 하나가 2배 넘게 넓어서 중점만 보면 "평균"(0.8~1.2배) 띠를 건너뛸 수 있다.
+// 중앙값이 들어 있는 막대는 정의상 평균이므로 먼저 잡는다.
+function binColor(bin: { lo: number; hi: number; mid: number }, median: number): string {
+    if (bin.lo <= median && median <= bin.hi) return "#2a78d6";
+    const ratio = bin.mid / median;
     if (ratio <= 0.5) return "#10b981"; // 매우 효율적
     if (ratio <= 0.8) return "#34d399"; // 효율적
     if (ratio <= 1.2) return "#2a78d6"; // 평균 근처
@@ -174,7 +177,7 @@ export default function BudgetScatter({
 
                     {bins.map((bin, i) => {
                         const isH = hoveredBin === i;
-                        const color = binColor(bin.mid, median);
+                        const color = binColor(bin, median);
                         return (
                             <g key={i}>
                                 <rect
