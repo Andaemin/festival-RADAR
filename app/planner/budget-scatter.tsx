@@ -34,11 +34,11 @@ function krwShort(value: number): string {
     return `${value}`;
 }
 
-function efficiencyGrade(cost: number, median: number): { label: string; color: "green" | "blue" | "purple" | "orange" | "red" } {
+function efficiencyGrade(cost: number, median: number): { label: string; color: "green" | "blue" | "orange" | "red" } {
     const ratio = cost / median;
     if (ratio <= 0.5) return { label: "매우 효율적", color: "green" };
-    if (ratio <= 0.8) return { label: "효율적", color: "blue" };
-    if (ratio <= 1.2) return { label: "평균", color: "purple" };
+    if (ratio <= 0.8) return { label: "효율적", color: "green" };
+    if (ratio <= 1.2) return { label: "평균", color: "blue" };
     if (ratio <= 1.8) return { label: "높은 편", color: "orange" };
     return { label: "매우 높음", color: "red" };
 }
@@ -223,6 +223,10 @@ export default function BudgetScatter({
             <div className="flex flex-wrap gap-x-2 sm:gap-x-3 gap-y-0.5 mt-1 text-[10px] sm:text-[11px]" style={{ color: "var(--mayo-text-muted)" }}>
                 <span className="flex items-center gap-1">
                     <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "#10b981" }} />
+                    매우 효율적
+                </span>
+                <span className="flex items-center gap-1">
+                    <span className="inline-block w-3 h-3 rounded-sm" style={{ background: "#34d399" }} />
                     효율적
                 </span>
                 <span className="flex items-center gap-1">
