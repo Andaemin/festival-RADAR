@@ -11,19 +11,22 @@ describe("GET /api/v1/reliability-audit", () => {
     __resetReliabilityAuditCacheForTests();
   });
 
-  // 이 수치는 canonical CSV에 종속된다. 원본 교체 시 함께 갱신할 것.
+  // 이 수치는 canonical CSV/series-linker 판정식에 종속된다. 둘 중 하나라도 바뀌면 함께 갱신할 것.
   // festival_2017_2026.csv 기준(2026-09-04): 이전 sanitized 판에서 n=2242/HIGH=1200/MEDIUM=1042.
   // 예산 자릿수 오류 10건이 교정되며 분석 가능한 series가 9개 늘었다.
-  it("baseline parity(spec 1절) 계약 - n=2251, HIGH=1211, MEDIUM=1040, helpText가 확정 표현을 쓰지 않는다", async () => {
+  // 다인원 cluster 간 안전 병합 도입(series-linker.ts의 mergeMultiMemberGroups,
+  // research-series-merge-impact.md 참고) 이후: n=2261(+10), HIGH=1190, MEDIUM=1071(자세한 경위는
+  // test/lib/multiyear-series/reliability-backtest.test.ts 주석 참고 - 동일 계산 로직).
+  it("baseline parity(spec 1절) 계약 - n=2261, HIGH=1190, MEDIUM=1071, helpText가 확정 표현을 쓰지 않는다", async () => {
     const res = await GET();
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.summary.seriesN).toBe(2251);
+    expect(json.summary.seriesN).toBe(2261);
     const high = json.summary.tiers.find((t: { tier: string }) => t.tier === "HIGH");
     const medium = json.summary.tiers.find((t: { tier: string }) => t.tier === "MEDIUM");
-    expect(high.n).toBe(1211);
-    expect(medium.n).toBe(1040);
+    expect(high.n).toBe(1190);
+    expect(medium.n).toBe(1071);
     expect(json.helpText).toContain("이 예산이 맞을 확률");
   }, 60_000);
 

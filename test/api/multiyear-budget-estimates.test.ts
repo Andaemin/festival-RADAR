@@ -364,16 +364,24 @@ describe("POST /api/v1/multiyear-budget-estimates - seriesSignal + basis metadat
   });
 
   it("AMBIGUOUS fallback: 여러 series에 동시에 HIGH로 걸리는 실제 축제명 -> peer 결과 완전히 그대로, reliabilityTier=LOW", async () => {
+    // "제21회 인천 펜타포트 음악축제"는 series-linker.ts의 다인원 cluster 안전 병합 도입
+    // (mergeMultiMemberGroups, research-series-merge-impact.md 참고) 이후 띄어쓰기만 다른 세
+    // 표기("인천펜타포트음악축제"/"인천펜타포트 음악축제"/"인천 펜타포트 음악축제")가 하나의
+    // series로 합쳐지며 더 이상 AMBIGUOUS가 아니게 됐다(FUZZY로 MATCHED - 이 시나리오는 바로
+    // 아래 새 테스트로 옮겨서 별도 검증한다). AMBIGUOUS 경로 자체는 여전히 실재하므로(예:
+    // "제22회 포천 백운계곡 동장군 축제" - 병합 후에도 서로 다른 2개 group에 동시에 HIGH로
+    // 걸리는 실제 잔여 사례) 그 축제로 교체해 이 테스트의 원래 의도(AMBIGUOUS -> peer fallback)를
+    // 계속 검증한다.
     const overrides = {
-      regionCode: "INCHEON",
-      district: "-",
-      festivalTypes: ["CULTURE_ART"],
+      regionCode: "GYEONGGI",
+      district: "포천시",
+      festivalTypes: ["COMMUNITY"],
       venueType: "VILLAGE",
       durationDays: 2,
       planningYear: 2026,
     };
     const { peer } = await callPeerOnly(overrides);
-    const { status, json } = await callPlanningApi({ ...overrides, festivalName: "제21회 인천 펜타포트 음악축제" });
+    const { status, json } = await callPlanningApi({ ...overrides, festivalName: "제22회 포천 백운계곡 동장군 축제" });
 
     expect(status).toBe(200);
     expect(json.seriesSignal.status).toBe("AMBIGUOUS");
@@ -391,6 +399,31 @@ describe("POST /api/v1/multiyear-budget-estimates - seriesSignal + basis metadat
     expect(json.reliabilityReason).toBe(
       "동일 축제의 충분한 과거 예산 이력을 확인하지 못해 유사 축제 데이터를 기반으로 추정했습니다."
     );
+  });
+
+  it("다인원 cluster 안전 병합 회귀 테스트: 띄어쓰기만 다른 3개 표기가 하나의 series로 합쳐져 MATCHED(FUZZY)가 된다", async () => {
+    // research-series-merge-impact.md에서 발견한 실제 사례 - series-linker.ts의
+    // mergeMultiMemberGroups가 "인천펜타포트음악축제"/"인천펜타포트 음악축제"/
+    // "인천 펜타포트 음악축제" 세 표기(각각 2건 이상 이력)를 하나로 합친다.
+    const overrides = {
+      regionCode: "INCHEON",
+      district: "-",
+      festivalTypes: ["CULTURE_ART"],
+      venueType: "VILLAGE",
+      durationDays: 2,
+      planningYear: 2026,
+    };
+    const { status, json } = await callPlanningApi({ ...overrides, festivalName: "제21회 인천 펜타포트 음악축제" });
+
+    expect(status).toBe(200);
+    expect(json.seriesSignal.status).toBe("MATCHED");
+    expect(json.seriesSignal.matchMethod).toBe("FUZZY");
+    expect(json.seriesSignal.canonicalName).toBe("인천펜타포트음악축제");
+    expect(json.seriesSignal.historyCount).toBe(9);
+    expect(json.estimateBasis).toBe("SERIES_HISTORY_MEDIAN");
+    // gap=1(2025년 이력까지 있음) -> LATEST 분기, 대표값 로직 자체는 이번 변경으로 건드리지 않았다.
+    expect(json.seriesSignal.estimateSource).toBe("LATEST");
+    expect(json.seriesSignal.latestHistoricalGap).toBe(1);
   });
 
   it("UNMATCHED fallback: 과거 이력이 없는 실제 축제명 -> peer 결과 완전히 그대로, reliabilityTier=LOW", async () => {
@@ -613,7 +646,7 @@ describe("POST /api/v1/multiyear-budget-estimates - PHASE 19-B: legacy confidenc
     const results = await Promise.all([
       callPlanningApi({ regionCode: "SEOUL", district: "-", festivalTypes: ["CULTURE_ART"], venueType: "VILLAGE", durationDays: 2, planningYear: 2026, festivalName: "한강페스티벌" }), // MATCHED
       callPlanningApi({ regionCode: "SEOUL", district: "-", festivalTypes: ["CULTURE_ART"], venueType: "VILLAGE", durationDays: 2, planningYear: 2026, festivalName: "2026 한강 서래섬 피크닉 콘서트(봄)" }), // UNMATCHED
-      callPlanningApi({ regionCode: "INCHEON", district: "-", festivalTypes: ["CULTURE_ART"], venueType: "VILLAGE", durationDays: 2, planningYear: 2026, festivalName: "제21회 인천 펜타포트 음악축제" }), // AMBIGUOUS
+      callPlanningApi({ regionCode: "GYEONGGI", district: "포천시", festivalTypes: ["COMMUNITY"], venueType: "VILLAGE", durationDays: 2, planningYear: 2026, festivalName: "제22회 포천 백운계곡 동장군 축제" }), // AMBIGUOUS(다인원 cluster 안전 병합 이후에도 남는 실제 잔여 사례 - 위 AMBIGUOUS fallback 테스트 주석 참고)
       callPlanningApi({ regionCode: "SEOUL", festivalTypes: ["CULTURE_ART"], venueType: "VILLAGE", durationDays: 2, planningYear: 2026 }), // NOT_REQUESTED
     ]);
     const [matched, unmatched, ambiguous, notRequested] = results;

@@ -23,21 +23,29 @@ describe("computeReliabilityBacktestSummary - baseline parity(spec 1절)", () =>
     summary = computeReliabilityBacktestSummary(allSeriesRecords);
   }, 120_000);
 
-  // 이 수치는 canonical CSV에 종속된다. 원본 교체 시 함께 갱신할 것.
+  // 이 수치는 canonical CSV/series-linker 판정식에 종속된다. 둘 중 하나라도 바뀌면 함께 갱신할 것.
   // festival_2017_2026.csv 기준(2026-09-04): 이전 sanitized 판에서 n=2242/HIGH=1200/MEDIUM=1042,
   // HIGH MdAPE 0.0928. 예산 자릿수 오류 10건이 교정되며 series가 9개 늘고 HIGH 정확도가 소폭 개선됐다.
-  it("Series n≈2251, HIGH/MEDIUM 분포, Estimate MdAPE가 알려진 production benchmark와 일치한다", () => {
+  //
+  // 다인원 cluster 간 안전 병합 도입(series-linker.ts의 mergeMultiMemberGroups,
+  // research-series-merge-impact.md 참고) 이후: n=2261(+10), HIGH=1190(-1... 실질적으로는 재분배),
+  // MEDIUM=1071(+31) - 이력이 늘며 다수가 MEDIUM(변동성 기준 미달)으로 재분류됐다. HIGH MdAPE는
+  // 0.0909→0.0923로 소폭 상승했지만 이는 tier 내부 재구성 효과이고, series 전체 MdAPE는
+  // 개선됨(research-series-merge-impact.md의 leakage-safe backtest, 20.63%→20.21% 참고 - 이
+  // summary는 own-history reliability-backtest 전용 모듈이라 fold 구성이 달라 수치가 1:1 대응하지
+  // 않는다).
+  it("Series n≈2261, HIGH/MEDIUM 분포, Estimate MdAPE가 알려진 production benchmark와 일치한다", () => {
     expect(summary.foldYears).toEqual([...RELIABILITY_BACKTEST_FOLD_YEARS]);
-    expect(summary.seriesN).toBe(2251);
+    expect(summary.seriesN).toBe(2261);
 
     const high = summary.tiers.find((t) => t.tier === "HIGH")!;
     const medium = summary.tiers.find((t) => t.tier === "MEDIUM")!;
-    expect(high.n).toBe(1211);
-    expect(medium.n).toBe(1040);
+    expect(high.n).toBe(1190);
+    expect(medium.n).toBe(1071);
     expect(high.n + medium.n).toBe(summary.seriesN);
 
     // G0 production benchmark(연구 문서 재현값)와 parity - 소수점 오차만 허용.
-    expect(high.estimateMdApe).toBeCloseTo(0.0909, 3);
+    expect(high.estimateMdApe).toBeCloseTo(0.0923, 3);
     expect(medium.estimateMdApe).toBeCloseTo(0.1, 3);
   });
 

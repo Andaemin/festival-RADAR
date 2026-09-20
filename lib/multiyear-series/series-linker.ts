@@ -305,6 +305,178 @@ function computeChainComponents(unmatchedRecords: SeriesRecordLite[]): ChainComp
 }
 
 // ------------------------------------------------------------------
+// 5) 다인원 cluster 간 안전한 병합 (기존 파이프라인의 사각지대 보완)
+// ------------------------------------------------------------------
+// 위 1~4단계(runFuzzyMatching)는 singleton(이력 1건)만 다른 cluster에 흡수시킨다 - 이미 이력
+// 2건 이상인 cluster끼리는 서로 한 번도 비교되지 않는다. 그래서 "가나다축제"/"가나다 축제"처럼
+// 띄어쓰기만 다른 표기가 각각 독립적으로 2건 이상의 이력을 쌓으면 영구히 분리된 채로 남는다
+// (research-series-merge-impact.md 참고 - 실제 leakage-safe backtest에서 이 사각지대 때문에
+// 나뉘어 있던 이력을 안전하게 합치면 Estimate MdAPE 20.63%→20.21% 개선을 확인했다).
+//
+// 이 단계는 그 사각지대만 메운다 - 기존 1~4단계는 한 글자도 건드리지 않고, 그 출력(groupsById/
+// groupIdByRecordId)에 대해서만 추가로 동작한다. score()/HIGH_THRESHOLD 등 기존 판정식도
+// 그대로 재사용한다 - 다만 다인원 cluster 병합은 한 번 잘못 합치면 영향 범위가 singleton보다
+// 훨씬 크므로, 이름 유사도 기준을 기존 HIGH band floor(0.90)보다 훨씬 보수적인 0.999(사실상
+// 띄어쓰기 등 표기 차이만 허용)로 제한한다.
+export const MULTI_MEMBER_MERGE_MIN_NAME_SIMILARITY = 0.999;
+
+function groupToScoreCluster(g: FrozenSeriesGroup): ScoreCluster {
+  return {
+    index: g.groupId,
+    key: { scope: g.scope, regionKey: g.canonicalRegion, districtKey: g.canonicalDistrict, normalizedName: g.canonicalName },
+    members: g.members,
+    firstYear: g.firstObservedYear,
+    lastYear: g.lastObservedYear,
+  };
+}
+
+/** union 시 "대표(canonicalName/district 등)로 남길 원본 group"을 고르는 결정적 tie-break -
+ *  UnionFind.preferred()와 동일한 정책(이력 많은 쪽 -> 이른 연도 -> 낮은 id)을 group에 적용. */
+function preferGroup(a: FrozenSeriesGroup, b: FrozenSeriesGroup): FrozenSeriesGroup {
+  if (a.members.length !== b.members.length) return a.members.length > b.members.length ? a : b;
+  if (a.firstObservedYear !== b.firstObservedYear) return a.firstObservedYear < b.firstObservedYear ? a : b;
+  return a.groupId < b.groupId ? a : b;
+}
+
+function membersShareYear(a: SeriesRecordLite[], b: SeriesRecordLite[]): boolean {
+  const yearsA = new Set(a.map((m) => m.datasetYear));
+  for (const m of b) if (yearsA.has(m.datasetYear)) return true;
+  return false;
+}
+
+export interface MultiMemberMergeResult {
+  groupsById: Map<number, FrozenSeriesGroup>;
+  groupIdByRecordId: Map<number, number>;
+  /** 실제로 적용된 union 1건당 1개 항목(감사/테스트용) - survivor에 absorbed가 흡수됨. */
+  appliedMerges: { survivingGroupId: number; absorbedGroupIds: number[] }[];
+}
+
+/**
+ * 이력 2건 이상인 group끼리만 대상으로 한다(이력 1건짜리 singleton은 위 1~4단계가 이미 전담 -
+ * 이 단계가 그 판정에 관여하면 기존 ambiguous 판정/회귀 위험이 커지므로 의도적으로 배제한다).
+ *
+ * 후보를 전부 모은 뒤 한꺼번에 union-find로 묶지 않는다 - **점수가 높은 후보부터 하나씩** union
+ * 여부를 확정하면서, 매번 union 직전에 `find()`로 그 시점의 **현재 root**를 다시 조회하고 그
+ * root에 지금까지 병합된 모든 구성원의 개최연도를 재검사한다. 예: A(2021,2022)-B(2023)가 먼저
+ * 합쳐지면 그다음 C(2022,2024)와의 병합 판정은 "A 하나"가 아니라 "A+B 전체"(2021,2022,2023)를
+ * 기준으로 하고, 2022년이 겹치므로 이 union만 차단한다 - A+B는 그대로 유지되고 C만 별도로
+ * 남는다(묶음 전체를 버리지 않고 안전한 부분만 최대한 살린다).
+ *
+ * 후보 정렬은 점수 내림차순(동점이면 groupId 오름차순)이라 입력 배열 순서와 무관하게 항상 같은
+ * 결과를 낸다(buildFrozenSeriesModel 호출부의 `sorted` 정렬도 이미 입력 순서 독립적이다).
+ */
+export function mergeMultiMemberGroups(
+  groupsById: ReadonlyMap<number, FrozenSeriesGroup>,
+  groupIdByRecordId: ReadonlyMap<number, number>
+): MultiMemberMergeResult {
+  const groups = [...groupsById.values()].filter((g) => g.members.length >= 2);
+
+  const buckets = new Map<string, FrozenSeriesGroup[]>();
+  for (const g of groups) {
+    const bk = bucketKeyString(g.scope, g.canonicalRegion);
+    if (!buckets.has(bk)) buckets.set(bk, []);
+    buckets.get(bk)!.push(g);
+  }
+
+  interface Candidate {
+    groupA: number;
+    groupB: number;
+    score: number;
+  }
+  const candidates: Candidate[] = [];
+  for (const bucket of buckets.values()) {
+    for (let i = 0; i < bucket.length; i++) {
+      for (let j = i + 1; j < bucket.length; j++) {
+        const gA = bucket[i];
+        const gB = bucket[j];
+        const candidate = score(groupToScoreCluster(gA), groupToScoreCluster(gB));
+        if (!candidate) continue;
+        if (candidate.nameSimilarity < MULTI_MEMBER_MERGE_MIN_NAME_SIMILARITY) continue;
+        if (candidate.band !== "HIGH") continue;
+        candidates.push({ groupA: gA.groupId, groupB: gB.groupId, score: candidate.score });
+      }
+    }
+  }
+  candidates.sort((x, y) => (y.score !== x.score ? y.score - x.score : x.groupA !== y.groupA ? x.groupA - y.groupA : x.groupB - y.groupB));
+
+  const parent = new Map<number, number>();
+  for (const g of groups) parent.set(g.groupId, g.groupId);
+  function find(x: number): number {
+    while (parent.get(x) !== x) {
+      parent.set(x, parent.get(parent.get(x)!)!);
+      x = parent.get(x)!;
+    }
+    return x;
+  }
+
+  const rootMembers = new Map<number, SeriesRecordLite[]>();
+  const rootOriginalGroupIds = new Map<number, number[]>();
+  for (const g of groups) {
+    rootMembers.set(g.groupId, g.members);
+    rootOriginalGroupIds.set(g.groupId, [g.groupId]);
+  }
+
+  const appliedMerges: MultiMemberMergeResult["appliedMerges"] = [];
+
+  for (const cand of candidates) {
+    const rootA = find(cand.groupA);
+    const rootB = find(cand.groupB);
+    if (rootA === rootB) continue; // 이미 같은 cluster로 병합됨(또는 재평가) - 다시 합칠 필요 없음
+
+    const membersA = rootMembers.get(rootA)!;
+    const membersB = rootMembers.get(rootB)!;
+    if (membersShareYear(membersA, membersB)) continue; // 지금까지 병합된 전체 연도 기준 재검사
+
+    const sizeA = membersA.length;
+    const sizeB = membersB.length;
+    const firstYearA = Math.min(...membersA.map((m) => m.datasetYear));
+    const firstYearB = Math.min(...membersB.map((m) => m.datasetYear));
+    let survivor = rootA;
+    let absorbed = rootB;
+    if (sizeB > sizeA || (sizeB === sizeA && (firstYearB < firstYearA || (firstYearB === firstYearA && rootB < rootA)))) {
+      survivor = rootB;
+      absorbed = rootA;
+    }
+    parent.set(absorbed, survivor);
+    rootMembers.set(survivor, [...membersA, ...membersB]);
+    rootMembers.delete(absorbed);
+    rootOriginalGroupIds.set(survivor, [...rootOriginalGroupIds.get(rootA)!, ...rootOriginalGroupIds.get(rootB)!]);
+    rootOriginalGroupIds.delete(absorbed);
+    appliedMerges.push({ survivingGroupId: survivor, absorbedGroupIds: [absorbed] });
+  }
+
+  const newGroupsById = new Map<number, FrozenSeriesGroup>(groupsById);
+  const newGroupIdByRecordId = new Map<number, number>(groupIdByRecordId);
+
+  const finalRoots = new Set<number>();
+  for (const g of groups) finalRoots.add(find(g.groupId));
+
+  for (const rootId of finalRoots) {
+    const constituentIds = rootOriginalGroupIds.get(rootId)!;
+    if (constituentIds.length === 1) continue; // 병합 없음 - 원본 group 그대로 유지
+
+    const constituentGroups = constituentIds.map((id) => groupsById.get(id)!);
+    for (const id of constituentIds) if (id !== rootId) newGroupsById.delete(id);
+    const anchor = constituentGroups.reduce((best, g) => preferGroup(best, g));
+    const allMembers = [...rootMembers.get(rootId)!].sort((a, b) => (a.datasetYear !== b.datasetYear ? a.datasetYear - b.datasetYear : a.id - b.id));
+    const merged: FrozenSeriesGroup = {
+      groupId: rootId,
+      canonicalName: computeModalRawName(allMembers),
+      scope: anchor.scope,
+      canonicalRegion: anchor.canonicalRegion,
+      canonicalDistrict: anchor.canonicalDistrict,
+      firstObservedYear: Math.min(...constituentGroups.map((g) => g.firstObservedYear)),
+      lastObservedYear: Math.max(...constituentGroups.map((g) => g.lastObservedYear)),
+      members: allMembers,
+    };
+    newGroupsById.set(rootId, merged);
+    for (const m of allMembers) newGroupIdByRecordId.set(m.id, rootId);
+  }
+
+  return { groupsById: newGroupsById, groupIdByRecordId: newGroupIdByRecordId, appliedMerges };
+}
+
+// ------------------------------------------------------------------
 // 공개 API
 // ------------------------------------------------------------------
 
@@ -405,5 +577,16 @@ export function buildFrozenSeriesModel(trainingPool: SeriesRecordLite[]): Frozen
     });
   }
 
-  return { groupIdByRecordId, matchMethodByRecordId, groupsById, ambiguousTrainingRecordCount: ambiguousBeforeChain.size };
+  // 5) 다인원 cluster 간 안전한 병합 - 위 1~4단계(EXACT/NORMALIZED_EXACT/FUZZY/CHAIN_HIGH_CONFIDENCE)
+  // 판정 결과(matchMethodByRecordId)는 그대로 두고, 그 결과로 만들어진 groupsById/
+  // groupIdByRecordId에만 추가로 적용한다 - 각 record가 "어떻게" 자기 원래 group에 합류했는지의
+  // 기록(matchMethod)은 병합 이후에도 바뀌지 않는다.
+  const multiMemberMerge = mergeMultiMemberGroups(groupsById, groupIdByRecordId);
+
+  return {
+    groupIdByRecordId: multiMemberMerge.groupIdByRecordId,
+    matchMethodByRecordId,
+    groupsById: multiMemberMerge.groupsById,
+    ambiguousTrainingRecordCount: ambiguousBeforeChain.size,
+  };
 }
