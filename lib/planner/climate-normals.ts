@@ -170,5 +170,5 @@ export function describeMonthClimate(
     }
     if (notes.length === 0) return null;
 
-    return `${month}월 ${climate.stationName} 기준 평년값: ${notes.join(", ")}. (기상청 1991~2020 평년값)`;
+    return `${month}월 ${climate.stationName} 기준 평년값: ${notes.join(", ")}. (출처: 기상청 기상자료개방포털 기후평년값 1991~2020)`;
 }

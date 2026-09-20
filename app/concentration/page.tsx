@@ -344,7 +344,7 @@ export default function ConcentrationPage() {
                     관광지 집중률 예측
                 </h1>
                 <p className="text-sm mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
-                    한국관광공사 빅데이터 기반 향후 30일간 관광지별 방문자 집중률 예측 분석
+                    한국관광공사 관광지 집중률 방문자 추이 예측 정보 기반 관광지별 집중률 분석
                 </p>
                 <MayoDivider />
             </header>
@@ -456,6 +456,9 @@ export default function ConcentrationPage() {
                                 showDots
                             />
                             </div>
+                            <p className="text-[10px] mt-2 text-right" style={{ color: "var(--mayo-text-muted)" }}>
+                                * 한국관광공사_관광지 집중률 방문자 추이 예측 정보 활용
+                            </p>
                         </MayoCard>
 
                         {/* 관광지별 평균 집중률 바 차트 (상위 10개) */}

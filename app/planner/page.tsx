@@ -346,8 +346,8 @@ export default function PlannerPage() {
             <header>
                 <h1 className="text-xl sm:text-2xl font-bold" style={{ color: "var(--mayo-text)" }}>축제 기획 추천</h1>
                 <p className="text-xs sm:text-sm mt-1" style={{ color: "var(--mayo-text-muted)" }}>
-                    전국 축제 개최 데이터를 분석해, <strong>전국에서는 검증됐지만 우리 지역에는 없는</strong>{" "}
-                    선택지를 찾아 차별화 방향을 제안합니다.
+                    전국 축제 개최 데이터와 기상청 기상자료개방포털 기후평년값(1991~2020)을 분석해,{" "}
+                    <strong>전국에서는 검증됐지만 우리 지역에는 없는</strong> 선택지를 찾아 차별화 방향을 제안합니다.
                 </p>
                 <MayoDivider />
             </header>
@@ -539,13 +539,18 @@ export default function PlannerPage() {
                                 </div>
                             </MayoCard>
                         )}
-                        <MonthChart
-                            distribution={result.monthDistribution}
-                            targetMonth={startMonth === "" ? null : Number(startMonth)}
-                            recommendedMonth={recommendedMonth}
-                            regionLabel={regionLabel}
-                            typeLabel={typeLabel}
-                        />
+                        <div>
+                            <MonthChart
+                                distribution={result.monthDistribution}
+                                targetMonth={startMonth === "" ? null : Number(startMonth)}
+                                recommendedMonth={recommendedMonth}
+                                regionLabel={regionLabel}
+                                typeLabel={typeLabel}
+                            />
+                            <p className="text-[10px] mt-1 text-right" style={{ color: "var(--mayo-text-muted)" }}>
+                                * 기상청 기상자료개방포털 기후평년값(1991~2020) 활용
+                            </p>
+                        </div>
                     </div>
 
                     {/* 추천 카드 목록 */}

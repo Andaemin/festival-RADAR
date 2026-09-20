@@ -215,7 +215,7 @@ export default function DashboardPage() {
             <header>
                 <h1 className="text-xl font-bold" style={{ color: "var(--mayo-text)" }}>대시보드</h1>
                 <p className="text-sm mt-0.5" style={{ color: "var(--mayo-text-muted)" }}>
-                    이동통신 빅데이터 기반 지역별 관광 수요 현황
+                    한국관광공사 빅데이터 지역별 방문자수(KT·SKT 이동통신 실측) 기반 시도별 관광 수요 현황
                 </p>
                 <MayoDivider />
             </header>
