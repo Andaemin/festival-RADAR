@@ -799,7 +799,28 @@ export default function PlannerPage() {
                     기획 조건을 입력하고 &quot;추천 받기&quot; 버튼을 누르면 분석 결과가 여기 표시됩니다.
                 </MayoAlert>
             )}
+
+            <DataSourcesNote />
         </main>
+    );
+}
+
+/**
+ * 페이지 최하단 데이터 출처 표기. 공공누리 제1유형·공공데이터포털 자료의 출처표시 의무를
+ * 채우기 위한 순수 표시용이라 계산·추천 로직과 무관하다. 결과 유무와 관계없이 항상 보이되
+ * 본문과 경쟁하지 않도록 최소 크기·옅은 색으로만 둔다(mt-auto로 화면 바닥에 붙인다).
+ *
+ * 기상청 링크 옆의 저작권 정책 링크는 기상청 정책(저작물 링크 시 정책도 함께 링크)에 따른 것.
+ */
+function DataSourcesNote() {
+    const link = (href: string, label: string) => (
+        <a href={href} target="_blank" rel="noopener noreferrer" className="hover:underline">{label}</a>
+    );
+    return (
+        <p className="mt-auto pt-6 text-right leading-relaxed" style={{ fontSize: 10, color: "var(--mayo-text-muted)", opacity: 0.7, wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+            기후 정보 출처: {link("https://data.kma.go.kr/climate/average30Years/selectAverage30YearsKoreaList.do?pgmNo=188", "기상청 기상자료개방포털")} 우리나라 기후평년값(1991~2020), 공공누리 제1유형 ·{" "}
+            {link("https://www.kma.go.kr/kma/guide/copyright.jsp", "기상청 저작권 정책")}. 월별 자료를 병합하여 사용합니다.
+        </p>
     );
 }
 
