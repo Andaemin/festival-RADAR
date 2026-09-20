@@ -26,8 +26,9 @@ logs/
 
 /lib/generated/prisma
 
-# 축제 데이터 엑셀 파일 (개인정보 포함 가능)
-/prisma/data/
+/prisma/data/*
+# 기후 평년값은 정적 공공데이터이므로 배포에 포함
+!/prisma/data/climate_normals_1991_2020.csv
 
 # Phase 연구/검증용 CSV (repository root만 대상 - 다른 위치의 CSV는 무시하지 않음)
 /phase*.csv
