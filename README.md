@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Festival RADAR
 
-## Getting Started
+**관광객 쏠림 및 집중률 감지 서비스**
 
-First, run the development server:
+전국 1만여 건의 축제 데이터와 관광 빅데이터를 분석하여, 지자체 문화관광과 담당자가 축제 기획 시 관광객 쏠림 현상을 사전에 감지하고 차별화된 축제를 기획할 수 있도록 돕는 서비스입니다.
+
+## 주요 기능
+
+- **관광 대시보드** — 시도별 방문자 수 현황 분석 (KT·SKT 이동통신 실측 기반)
+- **관광지 집중률 예측** — 관광지별 방문자 집중률 및 일별 추이 예측
+- **월별 경쟁 축제 분석** — 전국 축제 개최 현황과 기후 평년값을 반영한 최적 개최 시기 추천
+- **축제 기획 추천** — 지역에 없는 축제 유형을 발굴하여 차별화 방향 제안
+
+## 활용 데이터
+
+| 데이터 | 출처 |
+|---|---|
+| 전국문화축제표준데이터 | 공공데이터포털 |
+| 관광지별 방문자 추이 예측 정보 | 한국관광공사 TourAPI |
+| 지역별 방문자 수 (관광 빅데이터) | 한국관광공사 |
+| 기후평년값 (1991~2020) | 기상청 기상자료개방포털 |
+
+## 기술 스택
+
+- **Frontend**: Next.js (App Router), React, MayoUI
+- **Database**: TiDB (MySQL 호환), Prisma ORM
+- **배포**: Vercel
+
+## 실행 방법
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+[http://localhost:3000](http://localhost:3000) 에서 확인할 수 있습니다.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 팀
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+2026 한국관광콘텐츠랩 공모전 출품작
